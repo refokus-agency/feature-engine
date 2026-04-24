@@ -1,8 +1,8 @@
 {
-  "name": "@refokus-agency/typescript-package-tmp",
+  "name": "@refokus-agency/feature-engine",
   "version": "0.0.0-development",
   "type": "module",
-  "description": "A template repository for Refokus typescript packages",
+  "description": "Declarative feature loading system with code splitting for Webflow projects",
   "main": "dist/index.js",
   "module": "dist/index.js",
   "types": "dist/index.d.ts",
@@ -11,30 +11,35 @@
       "types": "./dist/index.d.ts",
       "require": "./dist/index.js",
       "import": "./dist/index.js"
+    },
+    "./vite": {
+      "types": "./dist/vite/index.d.ts",
+      "require": "./dist/vite/index.js",
+      "import": "./dist/vite/index.js"
     }
   },
   "files": [
-    "dist/**/*",
+    "dist/**/*.js",
+    "dist/**/*.d.ts",
     "README.md",
     "LICENSE"
   ],
   "author": "",
   "keywords": [
     "webflow",
-    "cms",
-    "sync",
-    "api",
-    "data-import",
+    "feature-loading",
+    "code-splitting",
+    "vite",
     "typescript"
   ],
   "repository": {
     "type": "git",
-    "url": "git+ssh://git@github.com/refokus-agency/typescript-package-tmp.git"
+    "url": "git+ssh://git@github.com/refokus-agency/feature-engine.git"
   },
   "bugs": {
-    "url": "https://github.com/refokus-agency/typescript-package-tmp/issues"
+    "url": "https://github.com/refokus-agency/feature-engine/issues"
   },
-  "homepage": "https://github.com/refokus-agency/typescript-package-tmp#readme",
+  "homepage": "https://github.com/refokus-agency/feature-engine#readme",
   "scripts": {
     "build": "tsc",
     "build:clean": "rm -rf dist && npm run build",
@@ -50,7 +55,6 @@
     "test:ui": "vitest --ui",
     "commit": "cz"
   },
-  "dependencies": {},
   "devDependencies": {
     "@eslint/js": "^9.30.1",
     "@total-typescript/tsconfig": "^1.0.4",
@@ -59,17 +63,20 @@
     "@typescript-eslint/eslint-plugin": "^8.36.0",
     "@typescript-eslint/parser": "^8.36.0",
     "@vitest/ui": "^3.2.4",
-    "commitizen": "^4.3.1",
+    "acorn": "^8.14.1",
+    "commitizen": "^4.2.4",
     "cz-conventional-changelog": "3.3.0",
     "eslint": "^9.30.1",
     "eslint-config-prettier": "^9.1.0",
     "eslint-plugin-n": "^17.21.0",
+    "jsdom": "^26.1.0",
     "prettier": "^3.6.2",
     "typescript": "^5.8.3",
+    "vite": "^6.3.5",
     "vitest": "^3.2.4"
   },
   "engines": {
-    "node": ">=22.0.0"
+    "node": ">=24.0.0"
   },
   "publishConfig": {
     "registry": "https://npm.pkg.github.com"
