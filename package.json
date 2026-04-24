@@ -1,0 +1,77 @@
+{
+  "name": "@refokus-agency/typescript-package-tmp",
+  "version": "0.0.0-development",
+  "type": "module",
+  "description": "A template repository for Refokus typescript packages",
+  "main": "dist/index.js",
+  "module": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "require": "./dist/index.js",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist/**/*",
+    "README.md",
+    "LICENSE"
+  ],
+  "author": "",
+  "keywords": [
+    "webflow",
+    "cms",
+    "sync",
+    "api",
+    "data-import",
+    "typescript"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+ssh://git@github.com/refokus-agency/typescript-package-tmp.git"
+  },
+  "bugs": {
+    "url": "https://github.com/refokus-agency/typescript-package-tmp/issues"
+  },
+  "homepage": "https://github.com/refokus-agency/typescript-package-tmp#readme",
+  "scripts": {
+    "build": "tsc",
+    "build:clean": "rm -rf dist && npm run build",
+    "build:watch": "tsc --watch",
+    "prepublishOnly": "npm run check-types && npm run lint && npm run build:clean",
+    "check-types": "tsc --noEmit --strict --skipLibCheck",
+    "lint": "eslint src --ext .ts --fix",
+    "lint:report": "eslint src --ext .ts",
+    "format": "prettier --write \"src/**/*.{ts,js,json}\"",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:coverage": "vitest run --coverage",
+    "test:ui": "vitest --ui",
+    "commit": "cz"
+  },
+  "dependencies": {},
+  "devDependencies": {
+    "@eslint/js": "^9.30.1",
+    "@total-typescript/tsconfig": "^1.0.4",
+    "@types/node": "^24.0.10",
+    "@types/webidl-conversions": "^7.0.3",
+    "@typescript-eslint/eslint-plugin": "^8.36.0",
+    "@typescript-eslint/parser": "^8.36.0",
+    "@vitest/ui": "^3.2.4",
+    "commitizen": "^4.3.1",
+    "cz-conventional-changelog": "3.3.0",
+    "eslint": "^9.30.1",
+    "eslint-config-prettier": "^9.1.0",
+    "eslint-plugin-n": "^17.21.0",
+    "prettier": "^3.6.2",
+    "typescript": "^5.8.3",
+    "vitest": "^3.2.4"
+  },
+  "engines": {
+    "node": ">=22.0.0"
+  },
+  "publishConfig": {
+    "registry": "https://npm.pkg.github.com"
+  }
+}
