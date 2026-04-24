@@ -1,9 +1,9 @@
 export interface FeatureDescriptor {
   id: string;
-  selectors: string[];
+  selectors: readonly string[];
   priority: number;
   global: boolean;
-  dependencies: string[];
+  dependencies: readonly string[];
   enabled: boolean;
   timeout: number | null;
   onSetup:
