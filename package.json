@@ -45,7 +45,7 @@
     "build:clean": "rm -rf dist && npm run build",
     "build:watch": "tsc --watch",
     "prepublishOnly": "npm run check-types && npm run lint && npm run build:clean",
-    "check-types": "tsc --noEmit",
+    "check-types": "tsc --noEmit --strict --skipLibCheck",
     "lint": "eslint src --ext .ts --fix",
     "lint:report": "eslint src --ext .ts",
     "format": "prettier --write \"src/**/*.{ts,js,json}\"",
