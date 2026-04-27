@@ -9,18 +9,21 @@
   "exports": {
     ".": {
       "types": "./dist/index.d.ts",
-      "require": "./dist/index.js",
       "import": "./dist/index.js"
     },
     "./vite": {
       "types": "./dist/vite/index.d.ts",
-      "require": "./dist/vite/index.js",
       "import": "./dist/vite/index.js"
     }
   },
   "files": [
     "dist/**/*.js",
     "dist/**/*.d.ts",
+    "!dist/**/__tests__/**",
+    "!dist/**/*.test.js",
+    "!dist/**/*.test.d.ts",
+    "!dist/**/*.spec.js",
+    "!dist/**/*.spec.d.ts",
     "README.md",
     "LICENSE"
   ],

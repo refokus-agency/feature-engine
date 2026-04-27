@@ -43,7 +43,7 @@ function getPropName(prop: Property): string {
 
 function extractLiteralValue(
   node: Expression | SpreadElement | null,
-): string | number | boolean | (string | number | boolean)[] | undefined {
+): string | number | boolean | Array<string | number | boolean> | undefined {
   if (!node) return undefined;
 
   if (node.type === 'Literal') {
@@ -54,7 +54,7 @@ function extractLiteralValue(
 
   if (node.type === 'ArrayExpression') {
     const arr = node as ArrayExpression;
-    const values: (string | number | boolean)[] = [];
+    const values: Array<string | number | boolean> = [];
     for (const el of arr.elements) {
       if (!el || el.type !== 'Literal' || typeof (el as Literal).value !== 'string')
         return undefined;
