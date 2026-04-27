@@ -37,8 +37,11 @@ yarn-error.log*
 .travis.yml
 .circleci/
 
+# Source maps (keep for dev, exclude from pack)
+*.map
+
 # Temporary files
 *.tmp
 *.swp
 *.swo
-*~ 
+*~

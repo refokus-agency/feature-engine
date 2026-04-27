@@ -3,9 +3,11 @@
     "compilerOptions": {
       "outDir": "./dist",
       "rootDir": "./src",
+      "lib": ["ES2022", "DOM", "DOM.Iterable"],
       "rewriteRelativeImportExtensions": true,
       "skipLibCheck": true,
-      "sourceMap": true
+      "sourceMap": true,
+      "declaration": true
     },
     "include": [
       "src/**/*.ts"
