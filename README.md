@@ -1,182 +1,249 @@
-# @refokus-agency/typescript-package-tmp
+# @refokus-agency/feature-engine
 
-A TypeScript package template for Refokus Agency focused on Webflow CMS sync tools.
-
-## Features
-
-- 🔧 Modern TypeScript configuration with strict mode
-- 📦 ES Module support with CommonJS compatibility
-- 🧪 Testing setup with Vitest
-- 🎨 Code formatting with Prettier
-- 🔍 Linting with ESLint (flat config)
-- 🏗️ Build pipeline with TypeScript compiler
-- 📝 Source maps for debugging
-
-## Requirements
-
-- Node.js >= 22.0.0
-
-> [!WARNING]
-
-This package is not meant to be published or installed. You need to copy this template and setup properly first
-
+Declarative feature loading system with code splitting for Webflow projects. Define features as isolated modules, let the engine handle DOM matching, dependency resolution, and lifecycle execution.
 
 ## Installation
 
 ```bash
-npm install @refokus-agency/typescript-package-tmp
+npm install @refokus-agency/feature-engine
 ```
 
-## Usage
+> Published to GitHub Packages under `@refokus-agency`. Configure your `.npmrc`:
+>
+> ```
+> @refokus-agency:registry=https://npm.pkg.github.com
+> ```
 
-```typescript
-import { exampleFunction } from '@refokus-agency/typescript-package-tmp';
+## Quick start
 
-exampleFunction(); // Outputs: Hello World
+### 1. Define a feature
+
+Create a file per feature (e.g. `src/features/accordion.feature.js`):
+
+```ts
+import { defineFeature } from '@refokus-agency/feature-engine';
+
+export default defineFeature({
+  id: 'accordion',
+  selectors: ['[data-feature="accordion"]'],
+  priority: 10,
+
+  onSetup(selectors) {
+    // Runs once. Return value becomes `ctx` in onEach.
+    // Return `false` to abort the feature entirely.
+    return { openIndex: 0 };
+  },
+
+  onEach({ el, index, elements, ctx }) {
+    // Runs for each matched DOM element.
+    el.addEventListener('click', () => { /* ... */ });
+  },
+
+  onReady() {
+    // Runs after all elements are processed.
+  },
+});
+```
+
+### 2. Register the Vite plugin
+
+```ts
+// vite.config.ts
+import { defineConfig } from 'vite';
+import { featureMetadataPlugin } from '@refokus-agency/feature-engine/vite';
+
+export default defineConfig({
+  plugins: [
+    featureMetadataPlugin(),
+    // or with a custom glob:
+    // featureMetadataPlugin({ include: 'modules/**/*.feature.js' }),
+  ],
+});
+```
+
+The plugin scans `src/features/**/*.feature.js` by default, extracts static metadata via AST, and exposes a virtual module with lazy loaders.
+
+### 3. Load features at runtime
+
+```ts
+// src/main.ts
+import { loadFeatures } from '@refokus-agency/feature-engine';
+import features from 'virtual:feature-metadata';
+
+loadFeatures(features, { timeout: 8000 });
+```
+
+That's it. The loader matches features against the current DOM, resolves dependencies via topological sort, and runs each feature's lifecycle with code splitting.
+
+## API
+
+### `defineFeature(descriptor): Readonly<FeatureDescriptor>`
+
+Validates and freezes a feature descriptor. Throws on invalid input.
+
+| Field | Type | Required | Default | Description |
+|-------|------|----------|---------|-------------|
+| `id` | `string` | yes | | Unique identifier |
+| `selectors` | `string[]` | yes | | CSS selectors to match. Use `[]` for global features |
+| `priority` | `number` | yes | | Lower values initialize first |
+| `global` | `boolean` | no | `false` | Always loads regardless of DOM (skips selector matching) |
+| `dependencies` | `string[]` | no | `[]` | Feature IDs that must complete before this one runs |
+| `enabled` | `boolean` | no | `true` | Set `false` to disable without removing the file |
+| `timeout` | `number \| null` | no | `null` | Max ms for lifecycle execution. `null` = no limit |
+| `onSetup` | `OnSetupFn` | * | | Runs once. Return `false` to abort; any other value becomes `ctx` |
+| `onEach` | `OnEachFn` | * | | Runs per matched element. Not allowed with `global: true` |
+| `onReady` | `OnReadyFn` | no | | Runs after all `onEach` calls complete |
+
+\* At least one of `onSetup` or `onEach` is required.
+
+### `loadFeatures(features, options?): Promise<void>`
+
+Loads and executes features in dependency order.
+
+| Option | Type | Default | Description |
+|--------|------|---------|-------------|
+| `timeout` | `number` | `10000` | Global timeout in ms (feature-level `timeout` overrides this) |
+| `logging` | `boolean` | `true` | Enable/disable console warnings |
+
+**Behavior:**
+
+1. **Match** — global features always match; others require at least one selector present in the DOM
+2. **Sort** — topological sort by dependencies, then by priority
+3. **Load** — lazy-import all matched features in parallel (`Promise.allSettled`)
+4. **Execute** — run each feature's lifecycle sequentially in sorted order, awaiting dependencies
+
+### `featureMetadataPlugin(options?): Plugin`
+
+Vite plugin that generates the `virtual:feature-metadata` module.
+
+| Option | Type | Default | Description |
+|--------|------|---------|-------------|
+| `include` | `string` | `features/**/*.feature.js` | Glob pattern relative to `src/` |
+
+The plugin extracts metadata statically (AST parsing) — only literal values are supported in feature descriptors. Dynamic expressions will cause the file to be skipped with a warning.
+
+Features with `enabled: false` and duplicate IDs are excluded. The virtual module provides hot-reload support in dev mode.
+
+## Lifecycle
+
+```
+defineFeature()
+  │
+  ├─ onSetup(selectors)     → runs once, receives matched selectors
+  │    ├─ returns false      → abort (skip onEach + onReady)
+  │    └─ returns ctx        → passed to onEach
+  │
+  ├─ onEach({ el, index, elements, ctx })  → runs per matched element
+  │
+  └─ onReady()               → runs after all elements processed
+```
+
+For **global features** (`global: true`): only `onSetup` and `onReady` run. `onEach` is not allowed.
+
+## Types
+
+All types are exported from the main entry point:
+
+```ts
+import type {
+  FeatureDescriptor,       // Frozen runtime descriptor
+  FeatureDescriptorInput,  // Input shape for defineFeature()
+  FeatureMeta,             // Metadata + lazy loader (used by loadFeatures)
+  LoaderOptions,           // Options for loadFeatures()
+  OnSetupFn,               // (selectors: string[]) => unknown | false | Promise<...>
+  OnEachFn,                // (ctx: FeatureEachContext) => void | Promise<void>
+  OnReadyFn,               // () => void | Promise<void>
+  FeatureEachContext,       // { el, index, elements, ctx }
+} from '@refokus-agency/feature-engine';
+```
+
+The Vite plugin entry exports:
+
+```ts
+import type {
+  FeatureMetadataPluginOptions,
+  ParsedFeatureMeta,
+} from '@refokus-agency/feature-engine/vite';
+```
+
+## Examples
+
+### Feature with dependencies
+
+```ts
+export default defineFeature({
+  id: 'scroll-animations',
+  selectors: ['[data-animate]'],
+  priority: 20,
+  dependencies: ['lenis'],
+
+  onSetup() {
+    return { timeline: gsap.timeline() };
+  },
+
+  onEach({ el, ctx }) {
+    ctx.timeline.from(el, { opacity: 0 });
+  },
+
+  onReady() {
+    ScrollTrigger.refresh();
+  },
+});
+```
+
+### Global feature (no DOM selectors)
+
+```ts
+export default defineFeature({
+  id: 'analytics',
+  selectors: [],
+  priority: 0,
+  global: true,
+
+  onSetup() {
+    initAnalytics();
+  },
+});
+```
+
+### Conditional abort
+
+```ts
+export default defineFeature({
+  id: 'video-player',
+  selectors: ['[data-video]'],
+  priority: 15,
+
+  onSetup() {
+    if (window.innerWidth < 768) return false; // abort on mobile
+    return { player: new VideoPlayer() };
+  },
+
+  onEach({ el, ctx }) {
+    ctx.player.mount(el);
+  },
+});
 ```
 
 ## Development
 
-### Available Scripts
-
-#### Building
 ```bash
 npm run build          # Compile TypeScript
 npm run build:clean    # Clean and rebuild
-npm run build:watch    # Watch mode
-```
-
-#### Testing
-```bash
 npm test               # Run tests
-npm run test:watch     # Watch mode
-npm run test:coverage  # With coverage
-npm run test:ui        # With UI
-```
-
-#### Code Quality
-```bash
 npm run check-types    # Type checking
 npm run lint           # Lint and fix
-npm run format         # Format code
-```
-
-## Project Structure
-
-```
-src/
-├── index.ts           # Main entry point
-└── example/
-    └── index.ts       # Example implementations
 ```
 
 ## Publishing
 
-This package uses automated semantic versioning and publishing through GitHub Actions. The release process is triggered automatically on pushes to the `main` branch or manually through GitHub Actions.
-
-### Release Process
-
-The publishing workflow (`workflows/release-package-version.yml`) handles the following:
-
-1. **Automatic Triggering**: Releases check are triggered on:
-   - Push to `main` branch
-
-2. **Environment**: Runs in the `Production` Github repository environment with required permissions
-    - Accesess `GH_PAT_TOKEN` secret inside `Production` environment
-        - Its value should be a [PAT](https://docs.github.com/en/authentication/keeping-your-account-and-data-secure/managing-your-personal-access-tokens) with the following access
-            - **repo**: all
-            - **packages**: all
-
-### Semantic Versioning
-
-> **⚠️ WARNING:**
-> This repository uses automated semantic versioning and publishing.
-> **Do not publish manually with `npm publish`.**
-> All releases are handled by GitHub Actions via semantic-release.
->  
-> To trigger a release, push to the `main` branch or use the GitHub Actions workflow manually.
->  
-> Ensure your commits follow [Conventional Commits](https://www.conventionalcommits.org/) to enable correct versioning and changelog generation.
-> In order to do that, you MUST run use `npm run commit` to run the commitizen wizzard and be compliant with our versioning standards
-
-The project uses [semantic-release](https://semantic-release.gitbook.io/) for automated version management based on conventional commits:
-
-- **Major version** (`x.0.0`): Breaking changes (commits with `BREAKING CHANGE:` or `!:`)
-- **Minor version** (`0.x.0`): New features (commits with `feat:`)
-- **Patch version** (`0.0.x`): Bug fixes (commits with `fix:`)
-
-
-
-### Commit Message Format
-
-Follow the [Conventional Commits](https://www.conventionalcommits.org/) specification:
+This package uses [semantic-release](https://semantic-release.gitbook.io/) for automated versioning via GitHub Actions. Commits must follow [Conventional Commits](https://www.conventionalcommits.org/):
 
 ```bash
-# Feature
-feat: add new functionality
-
-# Bug fix
-fix: resolve issue with feature
-
-# Breaking change
-feat!: remove deprecated API
-# or
-feat: add new API
-BREAKING CHANGE: old API has been removed
-
-# Documentation
-docs: update README
-
-# Style changes
-style: format code
-
-# Refactoring
-refactor: restructure code
-
-# Performance
-perf: improve performance
-
-# Tests
-test: add unit tests
+npm run commit         # Commitizen wizard
 ```
 
-### Publishing to GitHub Packages
-
-The package is published to GitHub Packages under the `@refokus-agency` scope. The workflow:
-
-- Uses GitHub Packages registry (`https://npm.pkg.github.com`)
-- Publishes under `@refokus-agency` scope
-- Requires `GITHUB_TOKEN` and `GH_PAT_TOKEN` secrets
-
-### Manual Release
-
-To trigger a release manually:
-
-1. Go to the GitHub repository
-2. Navigate to **Actions** tab
-3. Select **Release Package Version** workflow
-4. Click **Run workflow**
-5. Choose the branch (usually `main`)
-6. Click **Run workflow**
-
-### Prerequisites
-
-Before publishing, ensure:
-
-- All tests pass (`npm test`)
-- Code is properly formatted (`npm run format`)
-- Linting passes (`npm run lint`)
-- Type checking passes (`npm run check-types`)
-- Commit messages follow conventional commits format
-
-### Release Notes
-
-Semantic-release automatically:
-- Generates changelog based on commit messages
-- Creates GitHub releases with release notes
-- Tags releases in Git
-- Updates package version in `package.json`
-
+Published to GitHub Packages on push to `main`.
 
 ## License
 
