@@ -55,4 +55,6 @@ dist
 datasources/
 *.csv
 
+*.tgz
+
 .npmrc

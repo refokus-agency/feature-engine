@@ -37,10 +37,11 @@ jobs:
         uses: cycjimmy/semantic-release-action@v4
         with:
           ci: true
-          semantic_version: 22
+          semantic_version: 24
           extra_plugins: |
             @semantic-release/changelog
             @semantic-release/git
+            @semantic-release/exec
         env:
           NODE_AUTH_TOKEN: ${{ secrets.GH_PAT_TOKEN }}
           GITHUB_TOKEN: ${{ secrets.GH_PAT_TOKEN }}
