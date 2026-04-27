@@ -1,15 +1,14 @@
 {
-  "name": "@refokus-agency/typescript-package-tmp",
+  "name": "@refokus-agency/feature-engine",
   "version": "0.0.0-development",
   "type": "module",
-  "description": "A template repository for Refokus typescript packages",
+  "description": "Lightweight feature orchestration engine for DOM-driven applications",
   "main": "dist/index.js",
   "module": "dist/index.js",
   "types": "dist/index.d.ts",
   "exports": {
     ".": {
       "types": "./dist/index.d.ts",
-      "require": "./dist/index.js",
       "import": "./dist/index.js"
     }
   },
@@ -20,21 +19,20 @@
   ],
   "author": "",
   "keywords": [
-    "webflow",
-    "cms",
-    "sync",
-    "api",
-    "data-import",
+    "feature-engine",
+    "dom",
+    "orchestration",
+    "lazy-loading",
     "typescript"
   ],
   "repository": {
     "type": "git",
-    "url": "git+ssh://git@github.com/refokus-agency/typescript-package-tmp.git"
+    "url": "git+ssh://git@github.com/refokus-agency/feature-engine.git"
   },
   "bugs": {
-    "url": "https://github.com/refokus-agency/typescript-package-tmp/issues"
+    "url": "https://github.com/refokus-agency/feature-engine/issues"
   },
-  "homepage": "https://github.com/refokus-agency/typescript-package-tmp#readme",
+  "homepage": "https://github.com/refokus-agency/feature-engine#readme",
   "scripts": {
     "build": "tsc",
     "build:clean": "rm -rf dist && npm run build",
@@ -66,6 +64,7 @@
     "eslint-plugin-n": "^17.21.0",
     "prettier": "^3.6.2",
     "typescript": "^5.8.3",
+    "jsdom": "^26.1.0",
     "vitest": "^3.2.4"
   },
   "engines": {
