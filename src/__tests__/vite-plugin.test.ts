@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterAll } from 'vitest';
-import { mkdirSync, writeFileSync, rmSync } from 'node:fs';
+import { mkdirSync, writeFileSync, rmSync, chmodSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { tmpdir } from 'node:os';
 import { parseFeatureFile } from '../vite/parse-feature-file.ts';
@@ -114,6 +114,19 @@ describe('parseFeatureFile', () => {
     it('defaults enabled to true when not present', () => {
       const result = parseFeatureFile(VALID_FEATURE, 'test.feature.js');
       expect(result!.enabled).toBe(true);
+    });
+
+    it('handles float timeout literal', () => {
+      const source = featureSource(`
+        id: "float-timeout",
+        selectors: ["[data-x]"],
+        priority: 1,
+        timeout: 1.5,
+        onSetup() {}
+      `);
+      const result = parseFeatureFile(source, 'float.feature.js');
+      expect(result).not.toBeNull();
+      expect(result!.timeout).toBe(1.5);
     });
 
     it('parses enabled: false', () => {
@@ -359,6 +372,26 @@ describe('parseFeatureFile', () => {
       );
     });
 
+    it('parses explicit empty dependencies array', () => {
+      const source = featureSource(`
+        id: "empty-deps",
+        selectors: ["[data-x]"],
+        priority: 1,
+        dependencies: [],
+        onSetup() {}
+      `);
+      const result = parseFeatureFile(source, 'empty-deps.feature.js');
+      expect(result).not.toBeNull();
+      expect(result!.dependencies).toEqual([]);
+    });
+
+    it('handles string-keyed properties (quoted keys)', () => {
+      const source = `import { defineFeature } from '@refokus-agency/feature-engine';\nexport default defineFeature({\n  "id": "quoted-key",\n  "selectors": ["[data-x]"],\n  "priority": 1,\n  onSetup() {}\n});\n`;
+      const result = parseFeatureFile(source, 'quoted.feature.js');
+      expect(result).not.toBeNull();
+      expect(result!.id).toBe('quoted-key');
+    });
+
     it('rejects non-string elements in dependencies array', () => {
       const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
       const source = featureSource(`
@@ -412,6 +445,74 @@ describe('featureMetadataPlugin', () => {
     expect(() => load.call({}, '\0virtual:feature-metadata')).toThrow(
       'configResolved has not been called yet',
     );
+  });
+
+  it('returns undefined from load for non-virtual module ids', () => {
+    const plugin = featureMetadataPlugin();
+    (plugin.configResolved as Function).call({}, { root: TMP_ROOT });
+    const result = (plugin.load as Function).call({}, 'some-regular-module');
+    expect(result).toBeUndefined();
+  });
+
+  describe('handleHotUpdate', () => {
+    it('invalidates virtual module for .feature.js file changes', () => {
+      const plugin = featureMetadataPlugin();
+      const handleHotUpdate = plugin.handleHotUpdate as Function;
+      const mockMod = { id: '\0virtual:feature-metadata' };
+      const mockServer = {
+        moduleGraph: {
+          getModuleById: vi.fn(() => mockMod),
+          invalidateModule: vi.fn(),
+        },
+      };
+
+      const result = handleHotUpdate.call({}, {
+        file: '/src/features/hero.feature.js',
+        server: mockServer,
+      });
+
+      expect(mockServer.moduleGraph.getModuleById).toHaveBeenCalledWith('\0virtual:feature-metadata');
+      expect(mockServer.moduleGraph.invalidateModule).toHaveBeenCalledWith(mockMod);
+      expect(result).toEqual([mockMod]);
+    });
+
+    it('returns undefined for non-.feature.js file changes', () => {
+      const plugin = featureMetadataPlugin();
+      const handleHotUpdate = plugin.handleHotUpdate as Function;
+      const mockServer = {
+        moduleGraph: {
+          getModuleById: vi.fn(),
+          invalidateModule: vi.fn(),
+        },
+      };
+
+      const result = handleHotUpdate.call({}, {
+        file: '/src/components/Button.tsx',
+        server: mockServer,
+      });
+
+      expect(result).toBeUndefined();
+      expect(mockServer.moduleGraph.getModuleById).not.toHaveBeenCalled();
+    });
+
+    it('returns undefined when virtual module is not in module graph', () => {
+      const plugin = featureMetadataPlugin();
+      const handleHotUpdate = plugin.handleHotUpdate as Function;
+      const mockServer = {
+        moduleGraph: {
+          getModuleById: vi.fn(() => undefined),
+          invalidateModule: vi.fn(),
+        },
+      };
+
+      const result = handleHotUpdate.call({}, {
+        file: '/src/features/hero.feature.js',
+        server: mockServer,
+      });
+
+      expect(result).toBeUndefined();
+      expect(mockServer.moduleGraph.invalidateModule).not.toHaveBeenCalled();
+    });
   });
 
   describe('load hook integration', () => {
@@ -515,6 +616,57 @@ describe('featureMetadataPlugin', () => {
       expect(warnSpy).toHaveBeenCalledWith(
         expect.stringContaining('Failed to parse'),
       );
+    });
+
+    it.skipIf(process.getuid?.() === 0)('warns and skips files that cannot be read', () => {
+      const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      const root = resolve(TMP_ROOT, 'read-fail');
+      const featuresDir = resolve(root, 'src', 'features');
+      mkdirSync(featuresDir, { recursive: true });
+      writeFileSync(
+        resolve(featuresDir, 'good.feature.js'),
+        featureSource(`id: "good", selectors: ["[data-x]"], priority: 1, onSetup() {}`),
+        'utf-8',
+      );
+      const unreadable = resolve(featuresDir, 'unreadable.feature.js');
+      writeFileSync(
+        unreadable,
+        featureSource(`id: "bad", selectors: ["[data-y]"], priority: 2, onSetup() {}`),
+        'utf-8',
+      );
+      chmodSync(unreadable, 0o000);
+
+      try {
+        const plugin = featureMetadataPlugin();
+        (plugin.configResolved as Function).call({}, { root });
+        const result = (plugin.load as Function).call({}, '\0virtual:feature-metadata') as string;
+
+        expect(result).toContain('"good"');
+        expect(result).not.toContain('"bad"');
+        expect(warnSpy).toHaveBeenCalledWith(
+          expect.stringContaining('Could not read'),
+        );
+      } finally {
+        chmodSync(unreadable, 0o644);
+      }
+    });
+
+    it('serializes timeout:null and empty dependencies in virtual module', () => {
+      const root = setupFixture('null-fields', {
+        'minimal.feature.js': featureSource(`
+          id: "minimal",
+          selectors: ["[data-x]"],
+          priority: 1,
+          onSetup() {}
+        `),
+      });
+
+      const plugin = featureMetadataPlugin();
+      (plugin.configResolved as Function).call({}, { root });
+      const result = (plugin.load as Function).call({}, '\0virtual:feature-metadata') as string;
+
+      expect(result).toContain('timeout: null');
+      expect(result).toContain('dependencies: []');
     });
   });
 });

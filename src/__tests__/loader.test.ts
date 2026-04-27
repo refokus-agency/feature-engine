@@ -120,6 +120,59 @@ describe('loadFeatures', () => {
       expect(receivedCtx).toEqual({ magic: 42 });
     });
 
+    it('passes correct { el, index, elements, ctx } shape to onEach', async () => {
+      document.body.innerHTML = '<div data-el></div><span data-el></span>';
+      const calls: { el: Element; index: number; elements: NodeListOf<Element>; ctx: unknown }[] = [];
+      const features = [
+        makeLoadable(
+          'shape-check',
+          {
+            onSetup: () => ({ token: 'abc' }),
+            onEach: (arg: { el: Element; index: number; elements: NodeListOf<Element>; ctx: unknown }) => {
+              calls.push(arg);
+            },
+            selectors: ['[data-el]'],
+          },
+          { selectors: ['[data-el]'], priority: 1 },
+        ),
+      ];
+
+      await loadFeatures(features);
+
+      expect(calls).toHaveLength(2);
+      expect(calls[0]!.el.tagName).toBe('DIV');
+      expect(calls[0]!.index).toBe(0);
+      expect(calls[0]!.elements).toHaveLength(2);
+      expect(calls[0]!.ctx).toEqual({ token: 'abc' });
+      expect(calls[1]!.el.tagName).toBe('SPAN');
+      expect(calls[1]!.index).toBe(1);
+      expect(calls[1]!.elements).toHaveLength(2);
+      expect(calls[1]!.ctx).toEqual({ token: 'abc' });
+    });
+
+    it('fires onReady when onSetup is null but onEach is present', async () => {
+      document.body.innerHTML = '<div data-r></div>';
+      const onEach = vi.fn();
+      const onReady = vi.fn();
+      const features = [
+        makeLoadable(
+          'ready-no-setup',
+          {
+            onSetup: null,
+            onEach,
+            onReady,
+            selectors: ['[data-r]'],
+          },
+          { selectors: ['[data-r]'], priority: 1 },
+        ),
+      ];
+
+      await loadFeatures(features);
+
+      expect(onEach).toHaveBeenCalledOnce();
+      expect(onReady).toHaveBeenCalledOnce();
+    });
+
     it('sorts features by priority', async () => {
       const order: string[] = [];
       const features = [
@@ -164,6 +217,19 @@ describe('loadFeatures', () => {
         expect.objectContaining({ message: expect.stringContaining('timed out') }),
       );
       expect(order).toContain('a');
+    });
+
+    it('resolves a deep 3-level dependency chain in correct order', async () => {
+      const order: string[] = [];
+      const features = [
+        makeLoadable('c', { onSetup: () => { order.push('c'); } }, { global: true, priority: 1, dependencies: ['b'] }),
+        makeLoadable('b', { onSetup: () => { order.push('b'); } }, { global: true, priority: 2, dependencies: ['a'] }),
+        makeLoadable('a', { onSetup: () => { order.push('a'); } }, { global: true, priority: 3 }),
+      ];
+
+      await loadFeatures(features);
+
+      expect(order).toEqual(['a', 'b', 'c']);
     });
 
     it('warns on unknown dependency and ignores it', async () => {
@@ -241,18 +307,43 @@ describe('loadFeatures', () => {
     });
 
     it('does not apply timeout when timeout is 0', async () => {
+      const warnSpy = vi.spyOn(console, 'warn').mockImplementation(noop);
       let resolved = false;
       const features = [
         makeLoadable(
-          'quick',
-          { onSetup: () => { resolved = true; } },
+          'async-no-timeout',
+          { onSetup: () => new Promise((r) => setTimeout(() => { resolved = true; r(undefined); }, 60)) },
           { global: true, priority: 1, timeout: 0 },
         ),
       ];
 
-      await loadFeatures(features);
+      await loadFeatures(features, { timeout: 0 });
 
       expect(resolved).toBe(true);
+      const timeoutWarnings = warnSpy.mock.calls.filter(
+        (c) => typeof c[0] === 'string' && c[0].includes('timed out'),
+      );
+      expect(timeoutWarnings).toHaveLength(0);
+    });
+
+    it('per-feature timeout overrides global timeout', async () => {
+      const warnSpy = vi.spyOn(console, 'warn').mockImplementation(noop);
+      const onSetup = vi.fn(() => new Promise((resolve) => setTimeout(resolve, 120)));
+      const features = [
+        makeLoadable(
+          'slow-ok',
+          { onSetup },
+          { global: true, priority: 1, timeout: 300 },
+        ),
+      ];
+
+      await loadFeatures(features, { timeout: 50 });
+
+      expect(onSetup).toHaveBeenCalledOnce();
+      const timeoutWarnings = warnSpy.mock.calls.filter(
+        (c) => typeof c[0] === 'string' && c[0].includes('timed out'),
+      );
+      expect(timeoutWarnings).toHaveLength(0);
     });
 
     it('warns and uses default when global timeout is negative', async () => {
@@ -405,6 +496,76 @@ describe('loadFeatures', () => {
       await loadFeatures([unmatched, dependent]);
 
       expect(order).toEqual(['dependent']);
+    });
+
+    it('calls onEach with ctx undefined when onSetup is absent', async () => {
+      document.body.innerHTML = '<div data-u></div>';
+      let receivedCtx: unknown = 'sentinel';
+      const features = [
+        makeLoadable(
+          'no-setup-ctx',
+          {
+            onSetup: null,
+            onEach: ({ ctx }: { ctx: unknown }) => { receivedCtx = ctx; },
+            selectors: ['[data-u]'],
+          },
+          { selectors: ['[data-u]'], priority: 1 },
+        ),
+      ];
+
+      await loadFeatures(features);
+
+      expect(receivedCtx).toBeUndefined();
+    });
+
+    it('resolves features with equal priority in stable input order', async () => {
+      const order: string[] = [];
+      const features = [
+        makeLoadable('first', { onSetup: () => { order.push('first'); } }, { global: true, priority: 10 }),
+        makeLoadable('second', { onSetup: () => { order.push('second'); } }, { global: true, priority: 10 }),
+        makeLoadable('third', { onSetup: () => { order.push('third'); } }, { global: true, priority: 10 }),
+      ];
+
+      await loadFeatures(features);
+
+      expect(order).toEqual(['first', 'second', 'third']);
+    });
+
+    it('does not call onEach when selectors match no elements', async () => {
+      document.body.innerHTML = '<div data-other></div>';
+      const onEach = vi.fn();
+      const onReady = vi.fn();
+      const features = [
+        makeLoadable(
+          'no-match-each',
+          {
+            onSetup: () => ({}),
+            onEach,
+            onReady,
+            selectors: ['[data-missing]'],
+          },
+          { selectors: ['[data-missing]'], priority: 1 },
+        ),
+      ];
+
+      await loadFeatures(features);
+
+      expect(onEach).not.toHaveBeenCalled();
+    });
+
+    it('warns about circular dependency in a 3-node cycle', async () => {
+      const warnSpy = vi.spyOn(console, 'warn').mockImplementation(noop);
+      const features = [
+        makeLoadable('x', { onSetup: noop }, { global: true, priority: 1, dependencies: ['z'], timeout: 100 }),
+        makeLoadable('y', { onSetup: noop }, { global: true, priority: 2, dependencies: ['x'], timeout: 100 }),
+        makeLoadable('z', { onSetup: noop }, { global: true, priority: 3, dependencies: ['y'], timeout: 100 }),
+      ];
+
+      await loadFeatures(features, { timeout: 100 });
+
+      expect(warnSpy).toHaveBeenCalledWith(
+        expect.stringContaining('Circular dependency'),
+      );
     });
 
     it('handles invalid CSS selector without crashing other features', async () => {
