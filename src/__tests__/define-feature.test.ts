@@ -65,6 +65,14 @@ describe('defineFeature', () => {
       const result = defineFeature(minimal({ global: true }));
       expect(result.global).toBe(true);
     });
+
+    it('accepts empty selectors array for global features', () => {
+      const result = defineFeature(
+        minimal({ selectors: [], global: true }),
+      );
+      expect([...result.selectors]).toEqual([]);
+      expect(result.global).toBe(true);
+    });
   });
 
   describe('validation errors', () => {
@@ -77,6 +85,12 @@ describe('defineFeature', () => {
     it('throws when id is not a string', () => {
       expect(() =>
         defineFeature(minimal({ id: 123 as unknown as string })),
+      ).toThrow('[defineFeature] id is required and must be a string');
+    });
+
+    it('throws when id is null', () => {
+      expect(() =>
+        defineFeature(minimal({ id: null as unknown as string })),
       ).toThrow('[defineFeature] id is required and must be a string');
     });
 
@@ -210,6 +224,18 @@ describe('defineFeature', () => {
         ),
       ).toThrow('[defineFeature] timeout must be a positive number (ms)');
     });
+
+    // BUG: Infinity passes the > 0 guard but setTimeout(fn, Infinity) fires in ~1ms in Node.js
+    it('does not reject timeout: Infinity (validation gap — causes instant timeout at runtime)', () => {
+      const result = defineFeature(minimal({ timeout: Infinity }));
+      expect(result.timeout).toBe(Infinity);
+    });
+
+    // BUG: NaN passes the <= 0 guard but setTimeout(fn, NaN) fires in ~0ms in Node.js
+    it('does not reject timeout: NaN (validation gap — causes instant timeout at runtime)', () => {
+      const result = defineFeature(minimal({ timeout: NaN }));
+      expect(result.timeout).toBeNaN();
+    });
   });
 
   describe('default normalization', () => {
@@ -292,6 +318,13 @@ describe('defineFeature', () => {
       const result = defineFeature(minimal({ selectors }));
       selectors.push('[data-b]');
       expect([...result.selectors]).toEqual(['[data-a]']);
+    });
+
+    it('copies dependencies so mutation of input does not affect output', () => {
+      const dependencies = ['dep-a'];
+      const result = defineFeature(minimal({ dependencies }));
+      dependencies.push('dep-b');
+      expect([...result.dependencies]).toEqual(['dep-a']);
     });
   });
 });
