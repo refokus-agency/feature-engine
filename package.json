@@ -1,40 +1,44 @@
 {
-  "name": "@refokus-agency/typescript-package-tmp",
+  "name": "@refokus-agency/feature-engine",
   "version": "0.0.0-development",
   "type": "module",
-  "description": "A template repository for Refokus typescript packages",
+  "description": "Feature loader and lifecycle engine for Refokus projects",
   "main": "dist/index.js",
   "module": "dist/index.js",
   "types": "dist/index.d.ts",
   "exports": {
     ".": {
       "types": "./dist/index.d.ts",
-      "require": "./dist/index.js",
       "import": "./dist/index.js"
     }
   },
   "files": [
     "dist/**/*",
+    "!dist/**/*.map",
+    "!dist/**/__tests__/**",
+    "!dist/**/*.test.js",
+    "!dist/**/*.test.d.ts",
+    "!dist/**/*.spec.js",
+    "!dist/**/*.spec.d.ts",
     "README.md",
     "LICENSE"
   ],
   "author": "",
   "keywords": [
-    "webflow",
-    "cms",
-    "sync",
-    "api",
-    "data-import",
-    "typescript"
+    "feature-engine",
+    "feature-loader",
+    "lifecycle",
+    "typescript",
+    "refokus"
   ],
   "repository": {
     "type": "git",
-    "url": "git+ssh://git@github.com/refokus-agency/typescript-package-tmp.git"
+    "url": "git+ssh://git@github.com/refokus-agency/feature-engine.git"
   },
   "bugs": {
-    "url": "https://github.com/refokus-agency/typescript-package-tmp/issues"
+    "url": "https://github.com/refokus-agency/feature-engine/issues"
   },
-  "homepage": "https://github.com/refokus-agency/typescript-package-tmp#readme",
+  "homepage": "https://github.com/refokus-agency/feature-engine#readme",
   "scripts": {
     "build": "tsc",
     "build:clean": "rm -rf dist && npm run build",
