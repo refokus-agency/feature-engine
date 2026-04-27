@@ -13,6 +13,7 @@ import type {
   UnaryExpression,
 } from 'acorn';
 
+/** Static metadata extracted from a `.feature.js` file via AST analysis. */
 export interface ParsedFeatureMeta {
   id: string;
   selectors: string[];

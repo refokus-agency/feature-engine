@@ -6,6 +6,7 @@ import type { ParsedFeatureMeta } from './parse-feature-file.ts';
 
 export type { ParsedFeatureMeta } from './parse-feature-file.ts';
 
+/** Options for the `featureMetadataPlugin` Vite plugin. */
 export interface FeatureMetadataPluginOptions {
   include?: string;
 }
