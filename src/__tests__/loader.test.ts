@@ -122,7 +122,7 @@ describe('loadFeatures', () => {
 
     it('passes correct { el, index, elements, ctx } shape to onEach', async () => {
       document.body.innerHTML = '<div data-el></div><span data-el></span>';
-      const calls: { el: Element; index: number; elements: NodeListOf<Element>; ctx: unknown }[] = [];
+      const calls: Array<{ el: Element; index: number; elements: NodeListOf<Element>; ctx: unknown }> = [];
       const features = [
         makeLoadable(
           'shape-check',

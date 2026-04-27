@@ -422,7 +422,7 @@ describe('featureMetadataPlugin', () => {
 
   it('resolves virtual:feature-metadata to internal id', () => {
     const plugin = featureMetadataPlugin();
-    const resolveId = plugin.resolveId as Function;
+    const resolveId = plugin.resolveId as (...args: any[]) => any;
     expect(resolveId.call({}, 'virtual:feature-metadata')).toBe(
       '\0virtual:feature-metadata',
     );
@@ -430,7 +430,7 @@ describe('featureMetadataPlugin', () => {
 
   it('returns undefined for non-virtual module ids', () => {
     const plugin = featureMetadataPlugin();
-    const resolveId = plugin.resolveId as Function;
+    const resolveId = plugin.resolveId as (...args: any[]) => any;
     expect(resolveId.call({}, 'some-other-module')).toBeUndefined();
   });
 
@@ -441,7 +441,7 @@ describe('featureMetadataPlugin', () => {
 
   it('throws if load is called before configResolved', () => {
     const plugin = featureMetadataPlugin();
-    const load = plugin.load as Function;
+    const load = plugin.load as (...args: any[]) => any;
     expect(() => load.call({}, '\0virtual:feature-metadata')).toThrow(
       'configResolved has not been called yet',
     );
@@ -449,15 +449,15 @@ describe('featureMetadataPlugin', () => {
 
   it('returns undefined from load for non-virtual module ids', () => {
     const plugin = featureMetadataPlugin();
-    (plugin.configResolved as Function).call({}, { root: TMP_ROOT });
-    const result = (plugin.load as Function).call({}, 'some-regular-module');
+    (plugin.configResolved as (...args: any[]) => any).call({}, { root: TMP_ROOT });
+    const result = (plugin.load as (...args: any[]) => any).call({}, 'some-regular-module');
     expect(result).toBeUndefined();
   });
 
   describe('handleHotUpdate', () => {
     it('invalidates virtual module for .feature.js file changes', () => {
       const plugin = featureMetadataPlugin();
-      const handleHotUpdate = plugin.handleHotUpdate as Function;
+      const handleHotUpdate = plugin.handleHotUpdate as (...args: any[]) => any;
       const mockMod = { id: '\0virtual:feature-metadata' };
       const mockServer = {
         moduleGraph: {
@@ -478,7 +478,7 @@ describe('featureMetadataPlugin', () => {
 
     it('returns undefined for non-.feature.js file changes', () => {
       const plugin = featureMetadataPlugin();
-      const handleHotUpdate = plugin.handleHotUpdate as Function;
+      const handleHotUpdate = plugin.handleHotUpdate as (...args: any[]) => any;
       const mockServer = {
         moduleGraph: {
           getModuleById: vi.fn(),
@@ -497,7 +497,7 @@ describe('featureMetadataPlugin', () => {
 
     it('returns undefined when virtual module is not in module graph', () => {
       const plugin = featureMetadataPlugin();
-      const handleHotUpdate = plugin.handleHotUpdate as Function;
+      const handleHotUpdate = plugin.handleHotUpdate as (...args: any[]) => any;
       const mockServer = {
         moduleGraph: {
           getModuleById: vi.fn(() => undefined),
@@ -535,9 +535,9 @@ describe('featureMetadataPlugin', () => {
       mkdirSync(resolve(root, 'src', 'features'), { recursive: true });
 
       const plugin = featureMetadataPlugin();
-      (plugin.configResolved as Function).call({}, { root });
+      (plugin.configResolved as (...args: any[]) => any).call({}, { root });
 
-      const result = (plugin.load as Function).call({}, '\0virtual:feature-metadata');
+      const result = (plugin.load as (...args: any[]) => any).call({}, '\0virtual:feature-metadata');
       expect(result).toBe('export default [\n\n];\n');
     });
 
@@ -549,9 +549,9 @@ describe('featureMetadataPlugin', () => {
       });
 
       const plugin = featureMetadataPlugin();
-      (plugin.configResolved as Function).call({}, { root });
+      (plugin.configResolved as (...args: any[]) => any).call({}, { root });
 
-      const result = (plugin.load as Function).call({}, '\0virtual:feature-metadata') as string;
+      const result = (plugin.load as (...args: any[]) => any).call({}, '\0virtual:feature-metadata') as string;
       const importCount = (result.match(/import\(/g) || []).length;
       expect(importCount).toBe(1);
       expect(warnSpy).toHaveBeenCalledWith(
@@ -566,9 +566,9 @@ describe('featureMetadataPlugin', () => {
       });
 
       const plugin = featureMetadataPlugin();
-      (plugin.configResolved as Function).call({}, { root });
+      (plugin.configResolved as (...args: any[]) => any).call({}, { root });
 
-      const result = (plugin.load as Function).call({}, '\0virtual:feature-metadata') as string;
+      const result = (plugin.load as (...args: any[]) => any).call({}, '\0virtual:feature-metadata') as string;
       expect(result).toContain('"active"');
       expect(result).not.toContain('"inactive"');
     });
@@ -587,9 +587,9 @@ describe('featureMetadataPlugin', () => {
       });
 
       const plugin = featureMetadataPlugin();
-      (plugin.configResolved as Function).call({}, { root });
+      (plugin.configResolved as (...args: any[]) => any).call({}, { root });
 
-      const result = (plugin.load as Function).call({}, '\0virtual:feature-metadata') as string;
+      const result = (plugin.load as (...args: any[]) => any).call({}, '\0virtual:feature-metadata') as string;
 
       expect(result).toContain('id: "my-feature"');
       expect(result).toContain('selectors: ["[data-my]"]');
@@ -609,9 +609,9 @@ describe('featureMetadataPlugin', () => {
       });
 
       const plugin = featureMetadataPlugin();
-      (plugin.configResolved as Function).call({}, { root });
+      (plugin.configResolved as (...args: any[]) => any).call({}, { root });
 
-      const result = (plugin.load as Function).call({}, '\0virtual:feature-metadata') as string;
+      const result = (plugin.load as (...args: any[]) => any).call({}, '\0virtual:feature-metadata') as string;
       expect(result).toContain('"good"');
       expect(warnSpy).toHaveBeenCalledWith(
         expect.stringContaining('Failed to parse'),
@@ -638,8 +638,8 @@ describe('featureMetadataPlugin', () => {
 
       try {
         const plugin = featureMetadataPlugin();
-        (plugin.configResolved as Function).call({}, { root });
-        const result = (plugin.load as Function).call({}, '\0virtual:feature-metadata') as string;
+        (plugin.configResolved as (...args: any[]) => any).call({}, { root });
+        const result = (plugin.load as (...args: any[]) => any).call({}, '\0virtual:feature-metadata') as string;
 
         expect(result).toContain('"good"');
         expect(result).not.toContain('"bad"');
@@ -662,8 +662,8 @@ describe('featureMetadataPlugin', () => {
       });
 
       const plugin = featureMetadataPlugin();
-      (plugin.configResolved as Function).call({}, { root });
-      const result = (plugin.load as Function).call({}, '\0virtual:feature-metadata') as string;
+      (plugin.configResolved as (...args: any[]) => any).call({}, { root });
+      const result = (plugin.load as (...args: any[]) => any).call({}, '\0virtual:feature-metadata') as string;
 
       expect(result).toContain('timeout: null');
       expect(result).toContain('dependencies: []');
