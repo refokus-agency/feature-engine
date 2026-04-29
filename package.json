@@ -1,6 +1,6 @@
 {
   "name": "@refokus-agency/feature-engine",
-  "version": "0.0.0-development",
+  "version": "1.0.0",
   "type": "module",
   "description": "Declarative feature loading system with code splitting for Webflow projects",
   "main": "dist/index.js",
