@@ -1,3 +1,10 @@
+## [1.0.1](https://github.com/refokus-agency/feature-engine/compare/v1.0.0...v1.0.1) (2026-04-29)
+
+
+### Bug Fixes
+
+* **pkg:** trigger release for tarball asset ([2e1b0e0](https://github.com/refokus-agency/feature-engine/commit/2e1b0e050f2979b322898a3c75569bb4bd1679c8)), closes [#19](https://github.com/refokus-agency/feature-engine/issues/19)
+
 # 1.0.0 (2026-04-29)
 
 
