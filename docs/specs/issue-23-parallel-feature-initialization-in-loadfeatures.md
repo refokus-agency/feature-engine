@@ -7,7 +7,7 @@ plan_level: "lean"
 depth: "medium"
 branch_name: "feat/23-parallel-feature-initialization"
 created_at: "2026-05-22T20:50:00Z"
-updated_at: "2026-05-22T21:55:00Z"
+updated_at: "2026-05-22T22:17:00Z"
 ---
 
 # Implementation Plan: #23 — Parallel feature initialization in loadFeatures
@@ -199,7 +199,8 @@ Replace lines 163-207:
 - **AC-6.** If a feature in a wave times out or fails, it shall not prevent other features in the same wave or subsequent waves from initializing. `markReady` shall fire in a `finally` block guaranteeing dependents unblock.
 - **AC-7.** When circular dependencies exist, the back-edge shall be pruned by `topoSort` and skipped by `runWithDeps`. Both features shall complete normally without timeout. A circular dependency warning shall be emitted.
 - **AC-8.** When a feature times out, its lifecycle shall be cancelled via `AbortSignal`. `onSetup` (if not yet started), `onEach`, and `onReady` shall not execute after abort.
-- **AC-9.** All existing tests (except modified ordering/circular tests) shall pass without changes.
+- **AC-9.** When a feature's dependency fails to load (chunk rejected), the system shall skip the dependent feature, emit a warning `Feature "${id}" skipped — dependency "${depId}" failed`, and propagate the failure to any feature depending on the skipped feature.
+- **AC-10.** All existing tests (except modified ordering/circular tests) shall pass without changes.
 
 ## Out of Scope
 
@@ -218,7 +219,8 @@ Replace lines 163-207:
 | 4 | Diamond: D(p=1)→{B,C}(p=5)→A(p=10) | [from issue] | Wave 1: D runs. Wave 5: B,C run concurrently (D already ready via `readySet`). Wave 10: A runs (B,C ready). |
 | 5 | F1,F2,F3 (same priority) depend on A (same priority) | [from issue] | All in same wave. Three resolvers registered in Set for A. `markReady('A')` iterates Set, resolves all three. Without the Set fix, only the last would resolve. |
 | 6 | Dep on unmatched feature | [from issue] | Unmatched features pre-seeded as ready in `readySet` (existing L143-147). `waitForDependency` resolves immediately. No change needed. |
-| 7 | Dep on failed chunk load | [from issue] | Chunk rejected → `markReady` called in rejected path (existing L168-170). Dependents unblock normally. |
+| 7 | Dep on failed chunk load | [from issue] | Chunk rejected → `failedIds.add(id)` + `markReady` called. Dependents unblock but `runWithDeps` checks `failedIds` before `initFeature` — skips with warning `Feature "X" skipped — dependency "Y" failed`. Failure cascades: skipped feature is also added to `failedIds`. |
+| 7b | Cascading dep failure (A→B→C, A fails) | [discovered during implementation] | A's chunk fails → B skipped (dep A failed) → C skipped (dep B failed). Each emits a "skipped" warning. Non-dependents in the same wave run normally. |
 | 8 | Worst-in-wave stall (1 slow, 9 fast) | [from issue] | Next wave blocked until slowest feature settles. Bounded by per-feature `timeout`. Consumers can set tight timeouts on known-slow features. |
 | 9 | Timeout covers dep-wait in parallel | [from issue] | `withTimeout` wraps entire `run()` (dep-wait + lifecycle). In sequential mode, deps completed before timeout started. In wave mode, within-wave dep-wait consumes real timeout budget. Semantic change — document in changelog. |
 | 10 | `enabled: false` on descriptor | [inferred] | `initFeature` returns early (L61). Feature's async task completes normally. `markReady` fires. Dependents unblock. |
@@ -237,7 +239,8 @@ Replace lines 163-207:
 | Cross-wave dependency promotion | AC-5 |
 | Pruned-edge cycle resolution | AC-7 |
 | AbortController cancellation | AC-8 |
-| Test updates | AC-9 |
+| Dependency failure propagation | AC-9 |
+| Test updates | AC-10 |
 
 ## Risks
 
@@ -272,5 +275,12 @@ Replace lines 163-207:
   - Does not run onReady after timeout during onSetup (AbortController)
   - Does not run onSetup after timeout during dep wait (AbortController)
   - Pruned circular dep does not affect non-circular deps
-- **257 total tests**, all passing
+- **Modified 1 existing test in `chunk load failure` describe:**
+  - `unblocks dependent features when a chunk fails to load` → renamed to `skips dependent feature when a chunk fails to load`, asserts onSetup NOT called + "skipped" warning emitted
+- **Added 4 new tests in `chunk load failure` describe:**
+  - Cascades failure through dependency chain (A fails → B,C skipped)
+  - Failure does not spread to non-dependents
+  - Skips feature when any dependency in the list failed
+  - (existing) Warns and continues when a chunk fails to load
+- **260 total tests**, all passing
 - **Concurrency verification:** Barrier pattern (Promise-based coordination) instead of setTimeout timing

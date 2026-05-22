@@ -385,7 +385,7 @@ describe('loadFeatures', () => {
       expect(onSetup).toHaveBeenCalledOnce();
     });
 
-    it('unblocks dependent features when a chunk fails to load', async () => {
+    it('skips dependent feature when a chunk fails to load', async () => {
       const warnSpy = vi.spyOn(console, 'warn').mockImplementation(noop);
       const onSetup = vi.fn();
       const features: FeatureMeta[] = [
@@ -404,7 +404,71 @@ describe('loadFeatures', () => {
         expect.stringContaining('Failed to load feature "broken"'),
         expect.any(Error),
       );
-      expect(onSetup).toHaveBeenCalledOnce();
+      expect(warnSpy).toHaveBeenCalledWith(
+        expect.stringContaining('Feature "dependent" skipped'),
+      );
+      expect(onSetup).not.toHaveBeenCalled();
+    });
+
+    it('cascades failure through dependency chain', async () => {
+      vi.spyOn(console, 'warn').mockImplementation(noop);
+      const bSetup = vi.fn();
+      const cSetup = vi.fn();
+      const features: FeatureMeta[] = [
+        makeMeta({
+          id: 'a',
+          global: true,
+          priority: 1,
+          load: () => Promise.reject(new Error('network error')),
+        }),
+        makeLoadable('b', { onSetup: bSetup }, { global: true, priority: 2, dependencies: ['a'] }),
+        makeLoadable('c', { onSetup: cSetup }, { global: true, priority: 3, dependencies: ['b'] }),
+      ];
+
+      await loadFeatures(features);
+
+      expect(bSetup).not.toHaveBeenCalled();
+      expect(cSetup).not.toHaveBeenCalled();
+    });
+
+    it('failure does not spread to non-dependents', async () => {
+      vi.spyOn(console, 'warn').mockImplementation(noop);
+      const depSetup = vi.fn();
+      const indepSetup = vi.fn();
+      const features: FeatureMeta[] = [
+        makeMeta({
+          id: 'broken',
+          global: true,
+          priority: 1,
+          load: () => Promise.reject(new Error('network error')),
+        }),
+        makeLoadable('dependent', { onSetup: depSetup }, { global: true, priority: 2, dependencies: ['broken'] }),
+        makeLoadable('independent', { onSetup: indepSetup }, { global: true, priority: 2 }),
+      ];
+
+      await loadFeatures(features);
+
+      expect(depSetup).not.toHaveBeenCalled();
+      expect(indepSetup).toHaveBeenCalledOnce();
+    });
+
+    it('skips feature when any dependency in the list failed', async () => {
+      vi.spyOn(console, 'warn').mockImplementation(noop);
+      const onSetup = vi.fn();
+      const features: FeatureMeta[] = [
+        makeLoadable('ok', { onSetup: noop }, { global: true, priority: 1 }),
+        makeMeta({
+          id: 'broken',
+          global: true,
+          priority: 1,
+          load: () => Promise.reject(new Error('network error')),
+        }),
+        makeLoadable('dependent', { onSetup }, { global: true, priority: 2, dependencies: ['ok', 'broken'] }),
+      ];
+
+      await loadFeatures(features);
+
+      expect(onSetup).not.toHaveBeenCalled();
     });
   });
 

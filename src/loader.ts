@@ -226,6 +226,7 @@ async function runWithDeps(
   knownIds: Set<string>,
   gate: DependencyGate,
   prunedEdges: Set<string>,
+  failedIds: Set<string>,
   warn: LogFn,
   signal?: AbortSignal,
 ): Promise<void> {
@@ -248,6 +249,15 @@ async function runWithDeps(
     });
     if (validDeps.length) {
       await Promise.all(validDeps.map(gate.waitForDependency));
+
+      const failedDep = validDeps.find((d) => failedIds.has(d));
+      if (failedDep) {
+        warn(
+          `[loader] Feature "${meta.id}" skipped — dependency "${failedDep}" failed`,
+        );
+        failedIds.add(meta.id);
+        return;
+      }
     }
   }
 
@@ -260,6 +270,7 @@ async function dispatchWaves(
   knownIds: Set<string>,
   gate: DependencyGate,
   prunedEdges: Set<string>,
+  failedIds: Set<string>,
   globalTimeout: number,
   warn: LogFn,
 ): Promise<void> {
@@ -282,7 +293,7 @@ async function dispatchWaves(
           }
 
           await withTimeout(
-            runWithDeps(meta, descriptor, knownIds, gate, prunedEdges, warn, controller.signal),
+            runWithDeps(meta, descriptor, knownIds, gate, prunedEdges, failedIds, warn, controller.signal),
             effectiveTimeout,
             meta.id,
             controller,
@@ -319,6 +330,7 @@ export async function loadFeatures(
   const knownIds = new Set(features.map((f) => f.id));
   const gate = createDependencyGate(features, matchedIds);
 
+  const failedIds = new Set<string>();
   const loaded: LoadedFeature[] = [];
   for (let i = 0; i < results.length; i++) {
     const result = results[i]!;
@@ -326,6 +338,7 @@ export async function loadFeatures(
 
     if (result.status === 'rejected') {
       warn(`[loader] Failed to load feature "${meta.id}":`, result.reason);
+      failedIds.add(meta.id);
       gate.markReady(meta.id);
       continue;
     }
@@ -340,5 +353,5 @@ export async function loadFeatures(
 
   const descriptorById = new Map(loaded.map((f) => [f.meta.id, f.descriptor]));
 
-  await dispatchWaves(waves, descriptorById, knownIds, gate, prunedEdges, globalTimeout, warn);
+  await dispatchWaves(waves, descriptorById, knownIds, gate, prunedEdges, failedIds, globalTimeout, warn);
 }
