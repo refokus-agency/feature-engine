@@ -1,3 +1,15 @@
+# [1.1.0](https://github.com/refokus-agency/feature-engine/compare/v1.0.1...v1.1.0) (2026-05-25)
+
+
+### Bug Fixes
+
+* propagate dependency failures through the initialization chain ([#23](https://github.com/refokus-agency/feature-engine/issues/23)) ([371e99d](https://github.com/refokus-agency/feature-engine/commit/371e99d3858ed4a68c18083f7c9f1e5a78a5fd38))
+
+
+### Features
+
+* parallel feature initialization with priority waves ([#23](https://github.com/refokus-agency/feature-engine/issues/23)) ([d4a6137](https://github.com/refokus-agency/feature-engine/commit/d4a6137fc0f3830332d96f5c8f56ee3bf45e1bce))
+
 ## [1.0.1](https://github.com/refokus-agency/feature-engine/compare/v1.0.0...v1.0.1) (2026-04-29)
 
 
