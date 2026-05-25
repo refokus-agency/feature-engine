@@ -7,7 +7,7 @@ plan_level: "lean"
 depth: "medium"
 branch_name: "feat/23-parallel-feature-initialization"
 created_at: "2026-05-22T20:50:00Z"
-updated_at: "2026-05-22T22:17:00Z"
+updated_at: "2026-05-25T19:45:00Z"
 ---
 
 # Implementation Plan: #23 — Parallel feature initialization in loadFeatures
@@ -16,120 +16,161 @@ updated_at: "2026-05-22T22:17:00Z"
 
 | # | Action | File | Purpose |
 |---|--------|------|---------|
-| 1 | modify | `src/loader.ts` | Fix resolver clobber bug, add wave grouping, concurrent dispatch, pruned-edge cycle resolution, AbortController cancellation |
-| 2 | modify | `src/__tests__/loader.test.ts` | Update ordering/circular tests, add 15 new tests for waves, abort, cycles, and edge cases |
+| 1 | modify | `src/loader.ts` | ~~Fix resolver clobber bug, add wave grouping, concurrent dispatch, pruned-edge cycle resolution, AbortController cancellation~~ ✅ + Refactor: extract ExecutionContext, pre-compute valid deps, extract loadChunks, separate match from sort |
+| 2 | modify | `src/__tests__/loader.test.ts` | ~~Update ordering/circular tests, add 15 new tests for waves, abort, cycles, and edge cases~~ ✅ + DRY: consolidate warn spy into beforeEach, fix makeLoadable selector duplication |
+| 3 | added | `docs/specs/issue-23-parallel-feature-initialization-in-loadfeatures.md` | Plan artifact [discovered during implementation] |
 
 ## Codebase Context
 
-- **`matchFeatures` (L7-32):** Filters `FeatureMeta[]` against DOM selectors, appends globals unconditionally, sorts by priority ascending. Keep as-is — output feeds into `topoSort`, then wave grouping.
-- **`topoSort` (L112-144):** DFS topological sort with cycle detection. Returns `TopoSortResult { sorted: FeatureMeta[]; prunedEdges: Set<string> }`. Pruned edges are back-edges removed to break cycles — communicated downstream so `runWithDeps` skips them (prevents cross-wave deadlock).
+- **`matchFeatures` (L28-53):** Filters `FeatureMeta[]` against DOM selectors, appends globals unconditionally, sorts by priority ascending. ⚠️ Finding 5: sort belongs closer to consumer, not inside the matching function.
+- **`topoSort` (L113-145):** DFS topological sort with cycle detection. Returns `TopoSortResult { sorted: FeatureMeta[]; prunedEdges: Set<string> }`. Pruned edges are back-edges removed to break cycles — communicated downstream so `runWithDeps` skips them (prevents cross-wave deadlock).
 - **`initFeature` (L77-106):** Per-feature lifecycle runner (onSetup → onEach → onReady). Accepts optional `AbortSignal` — checks `signal.aborted` before onSetup, before/during onEach loop, and before onReady to cancel ghost execution after timeout.
 - **`withTimeout` (L55-75):** Races a promise against setTimeout. Simplified to take resolved `ms: number` (caller resolves null → default). Accepts optional `AbortController` — calls `controller.abort()` on timeout.
-- **`createDependencyGate` (L184-220):** Pub/sub mechanism encapsulated in `DependencyGate` interface. Uses `Map<string, Set<() => void>>` (fixes resolver clobber bug).
-- **`runWithDeps` (L222-254):** Validates deps (self-dep, unknown, pruned circular), waits via gate, calls initFeature. Threads `prunedEdges` and `AbortSignal`.
-- **`dispatchWaves` (L256-297):** Iterates waves sequentially, `Promise.allSettled` within each. Creates `AbortController` per feature.
+- **`createDependencyGate` (L185-221):** Pub/sub mechanism encapsulated in `DependencyGate` interface. Uses `Map<string, Set<() => void>>` (fixes resolver clobber bug).
+- **`runWithDeps` (L223-265):** Validates deps (self-dep, unknown, pruned circular), waits via gate, calls initFeature. ⚠️ Finding 3: dep validation is static and pre-computable. ⚠️ Finding 1: takes 8 params.
+- **`dispatchWaves` (L267-309):** Iterates waves sequentially, `Promise.allSettled` within each. Creates `AbortController` per feature. ⚠️ Finding 1: takes 8 params.
+- **`loadFeatures` (L311-357):** Orchestrator with 6 sequential responsibilities. ⚠️ Finding 4: load-result processing should be extracted.
 - **Code style:** camelCase functions, PascalCase types, SCREAMING_SNAKE constants. Named type imports with `.ts` extension (ESM). async/await throughout. `warn + continue` error pattern.
 - **Package version:** `0.0.0-development` (pre-1.0, managed by semantic-release). Breaking changes acceptable with changelog.
 
 ## Steps
 
-### Step 1: Add `groupIntoWaves()` function
-Add a new function after `topoSort` that groups features by effective wave (priority value + cross-wave dependency promotion).
+### ~~Step 1: Add `groupIntoWaves()` function~~ ✅
+### ~~Step 2: Fix resolver clobber bug~~ ✅
+### ~~Step 3: Replace sequential for-loop with wave-based dispatch~~ ✅
+### ~~Step 4: Update test "resolves features with equal priority in stable input order"~~ ✅
+### ~~Step 5: Add test — same-priority features run concurrently~~ ✅
+### ~~Step 6: Add test — multiple features depend on same feature (resolver fix)~~ ✅
+### ~~Step 7: Add test — cross-wave dependency promotion~~ ✅
+### ~~Step 8: Add test — diamond dependency across waves~~ ✅
+### ~~Step 9: Add test — cross-priority ordering preserved~~ ✅
+### ~~Step 10: Run full test suite~~ ✅ (139 tests passing)
 
-**Precondition:** Input MUST be in topoSort order (dependencies appear before dependents). This invariant guarantees single-pass correctness — by the time a feature is processed, all its dependencies' effective waves are already computed.
+### Step 11: Extract `ExecutionContext` interface [NEW — Refactor]
 
-**Algorithm:** Single-pass in topoSort order. Maintain `effectiveWave: Map<string, number>` keyed by feature ID. For each feature:
-1. Start with `wave = feature.priority`
-2. For each dep in `feature.dependencies`: look up `effectiveWave.get(depId)`. If the dep is NOT in the map (unmatched feature, pre-seeded as ready), skip it — it does not affect wave promotion. If found and `> wave`, update `wave`.
-3. Store `effectiveWave.set(feature.id, wave)`
-4. If `wave !== feature.priority`, emit warning: `[loader] Feature "${id}" promoted from priority ${feature.priority} to wave ${wave} — depends on "${depId}" in later wave`
+Extract shared mutable state passed through `dispatchWaves` and `runWithDeps` into a single value object.
 
-**Done when:** Function takes sorted `FeatureMeta[]`, returns `Map<number, FeatureMeta[]>` with features grouped by effective wave. Cross-wave deps cause promotion with warning. Deps not in the map (unmatched/failed-load) are skipped without promotion.
-
-### Step 2: Fix resolver clobber bug
-Change `resolvers` from `Map<string, () => void>` to `Map<string, Set<() => void>>`.
-
-Update `waitForDependency`: create Set if not exists, add resolve callback to Set.
-Update `markReady`: iterate Set with `forEach`, call each resolver, then delete the entry.
-
-**Done when:** `waitForDependency` adds to a Set; `markReady` resolves all callbacks in the Set. Multiple features depending on the same feature all unblock correctly.
-
-### Step 3: Replace sequential for-loop with wave-based dispatch
-Replace lines 163-207 with:
-
-1. **Pre-process:** Iterate `sorted` and `results` in parallel. For each `results[i]`:
-   - If `result.status === 'rejected'`: warn, call `markReady(id)`, **exclude from further processing**.
-   - If `result.status === 'fulfilled'`: add to a filtered array of type `Array<{ meta: FeatureMeta; descriptor: FeatureDescriptor }>`.
-   - **Only fulfilled features** are passed to `groupIntoWaves`.
-
-2. **Group:** Call `groupIntoWaves(filtered.map(f => f.meta), warn)` to get wave groups. Then re-associate each `FeatureMeta` with its loaded `FeatureDescriptor` for dispatch.
-
-3. **Wave keys:** Get sorted wave keys: `[...waves.keys()].sort((a, b) => a - b)` — MUST use numeric comparator, not default lexicographic sort.
-
-4. **Dispatch:** For each wave in order:
 ```typescript
-await Promise.allSettled(waveFeatures.map(async (f) => {
-  try {
-    const run = async (): Promise<void> => {
-      // validate + waitForDependency for declared deps
-      await initFeature(f.descriptor, f.meta.selectors);
-    };
-    await withTimeout(run(), f.meta.timeout, f.meta.id, globalTimeout);
-  } catch (err) {
-    warn(`[loader] Feature "${f.meta.id}" failed:`, err);
-  } finally {
-    markReady(f.meta.id);  // MUST be in finally — fires on success, failure, AND timeout
-  }
-}));
+interface ExecutionContext {
+  knownIds: Set<string>;
+  gate: DependencyGate;
+  prunedEdges: Set<string>;
+  failedIds: Set<string>;
+  warn: LogFn;
+}
 ```
 
-**Critical: `markReady` in `finally`** — This guarantees markReady fires whether the feature succeeds, throws, or times out. Without `finally`, a timed-out feature's markReady never fires, permanently blocking any dependents waiting on it. This preserves the existing semantic where markReady was called unconditionally after the catch block (L206).
+**Changes:**
+1. Define `ExecutionContext` interface near the other interfaces at the top of the file
+2. Refactor `dispatchWaves` signature: `(waves, descriptorById, ctx, globalTimeout)` — 4 params instead of 8
+3. Refactor `runWithDeps` signature: `(meta, descriptor, ctx, signal?)` — 4 params instead of 8
+4. Update `loadFeatures` to construct the context object and pass it through
+5. Internal reads use `ctx.knownIds`, `ctx.gate.markReady(id)`, etc.
 
-**Critical: async arrow function** — Each wave closure MUST be `async` so any synchronous throw becomes a rejected promise captured by `Promise.allSettled`, not an unhandled exception.
+**Done when:** `dispatchWaves` has ≤5 params, `runWithDeps` has ≤5 params. All 139 tests pass. Zero behavior change.
 
-**Done when:** Waves execute sequentially. Features within each wave run concurrently via `Promise.allSettled`. `markReady` is called in `finally` for every feature. Only fulfilled loads are dispatched. All existing behavior (timeout, dep resolution, error handling) is preserved.
+### Step 12: Pre-compute valid dependencies [NEW — Refactor]
 
-### Step 4: Update test "resolves features with equal priority in stable input order"
-Change assertion from `expect(order).toEqual(['first', 'second', 'third'])` to verify all 3 features ran regardless of order.
+Move the dep validation logic out of `runWithDeps` into a pre-processing step.
 
-**Done when:** Test passes under concurrent within-wave execution.
+**Current state (lines 234-249):** `runWithDeps` filters deps on every invocation — self-dep check, unknown-dep check, pruned-edge check. All three conditions are static (known before dispatch starts).
 
-### Step 5: Add test — same-priority features run concurrently
-Two global features at the same priority: one with a 200ms async `onSetup`, one synchronous. Verify the fast one's `onSetup` executes before the slow one completes.
+**Changes:**
+1. Add `validDeps: string[]` to `LoadedFeature` interface
+2. Add a `buildValidDeps` function that takes `(meta, knownIds, prunedEdges, warn)` and returns the filtered, deduplicated array — emitting warnings for self-dep and unknown-dep during pre-computation
+3. Call `buildValidDeps` for each loaded feature in `loadFeatures` after topoSort, before dispatch
+4. Simplify `runWithDeps` to only: (a) wait for `validDeps`, (b) check `failedIds`, (c) call `initFeature`
 
-**Done when:** Test proves concurrent execution (fast not blocked by slow peer).
+**Done when:** `runWithDeps` contains no dep filtering logic. All dep warnings are emitted during pre-computation. All 139 tests pass.
 
-### Step 6: Add test — multiple features depend on same feature (resolver fix)
-F1, F2, F3 all depend on A, all at the same priority. Verify all 3 run after A completes.
+### Step 13: Extract `loadChunks` function [NEW — Refactor]
 
-**Done when:** All 3 dependents execute their `onSetup` after A's `markReady`.
+Extract the `Promise.allSettled` + result-processing loop from `loadFeatures` into a dedicated function.
 
-### Step 7: Add test — cross-wave dependency promotion
-A(p=1, deps=[B]) and B(p=25). Verify both run (A waits for B), and a promotion warning is emitted.
+```typescript
+interface LoadResult {
+  loaded: LoadedFeature[];
+  failedIds: Set<string>;
+}
 
-**Done when:** Both features initialize, warning about promotion logged.
+async function loadChunks(
+  sortedFeatures: FeatureMeta[],
+  gate: DependencyGate,
+  warn: LogFn,
+): Promise<LoadResult>
+```
 
-### Step 8: Add test — diamond dependency across waves
-D(p=1, no deps), B(p=5, deps=[D]), C(p=5, deps=[D]), A(p=10, deps=[B,C]). Verify correct resolution order.
+**Changes:**
+1. Move lines 327-347 from `loadFeatures` into `loadChunks`
+2. `loadChunks` calls `Promise.allSettled(sortedFeatures.map(f => f.load()))`, processes results, calls `gate.markReady` for failures, returns `{ loaded, failedIds }`
+3. `loadFeatures` becomes a thin coordinator: match → sort → createGate → loadChunks → groupWaves → dispatch
 
-**Done when:** D runs in wave 1, B and C run concurrently in wave 5 (after D), A runs in wave 10 (after B and C).
+**Done when:** `loadFeatures` is ≤25 lines of orchestration calls. All 139 tests pass.
 
-### Step 9: Add test — cross-priority ordering preserved
-Features at p=1 and p=10 with no dependencies between them. Verify p=1 features complete before p=10 features start.
+### Step 14: Separate matching from sorting [NEW — Refactor]
 
-**Done when:** Timing assertion confirms sequential wave execution.
+`matchFeatures` currently both filters by selector/global AND sorts by priority. These are two distinct concerns.
 
-### Step 10: Run full test suite
-**Done when:** `vitest` passes all tests including new ones. Zero regressions.
+**Changes:**
+1. Remove `.sort((a, b) => a.priority - b.priority)` from `matchFeatures`
+2. Add explicit sort in `loadFeatures` between `matchFeatures` and `topoSort`: `matched.sort((a, b) => a.priority - b.priority)`
+
+**Done when:** `matchFeatures` is a pure filter. Sort is explicit in the orchestrator. All tests pass.
+
+### Step 15: DRY test helpers [NEW — Refactor]
+
+**15a. Consolidate `vi.spyOn(console, 'warn')` into `beforeEach` per describe block:**
+- `dependency ordering` block: all 4 tests need it → move to block-level `beforeEach`
+- `chunk load failure` block: all 5 tests need it → move to block-level `beforeEach`
+- `wave-based concurrent dispatch` block: 12 of 14 tests need it → move to block-level `beforeEach`
+- Tests that assert on `warnSpy` still call `vi.spyOn` to get the mock instance reference
+
+**15b. Fix selector duplication in `makeLoadable`:**
+- Update `makeLoadable` to derive `meta.selectors` from `descriptor.selectors` when not explicitly overridden in the meta argument
+- Removes ~10 duplicated selector arrays across the test file
+
+**Done when:** No bare `vi.spyOn(console, 'warn').mockImplementation(noop)` lines exist in individual tests where the block-level `beforeEach` already provides it. Selector strings appear once per test call. All tests pass.
+
+### Step 16: Run full test suite [NEW] ✅ (142 tests passing)
+
+### Step 17: Fix runtime failure cascade in dispatchWaves [NEW — Review Fix]
+
+Add `ctx.failedIds.add(feature.meta.id)` in `dispatchWaves` catch block so runtime failures (onSetup/onEach/onReady throwing) cascade to dependents — matching chunk-load failure behavior.
+
+**Done when:** Runtime throw in onSetup causes dependents to be skipped. Test added and passing. ✅
+
+### Step 18: Fix deadlock warning false positive [NEW — Review Fix]
+
+Change `feature.meta.dependencies.length` to `feature.validDeps.length` in `dispatchWaves` deadlock risk warning. Prevents spurious warning when all deps are pruned/self/unknown.
+
+**Done when:** Warning only fires when there are actual valid deps with timeout ≤ 0. ✅
+
+### Step 19: Add NaN guard to resolveTimeout [NEW — Review Fix]
+
+Add `Number.isNaN(timeout)` check alongside the existing `< 0` guard. Falls back to default with warning.
+
+**Done when:** `resolveTimeout(NaN, warn)` returns `DEFAULT_TIMEOUT_MS` and emits warning. ✅
+
+### Step 20: Add missing test coverage from review [NEW — Review Fix]
+
+- Test: runtime throw cascading to dependent (P1-2)
+- Test: runtime throw cascading through dependency chain
+- Test: timeout fires mid-`onEach` loop — remaining iterations and `onReady` skipped (AC-8 gap)
+
+**Done when:** 3 new tests pass. Total: 142 tests. ✅
+
+### Step 21: Run full test suite after review fixes [NEW]
+
+**Done when:** `vitest` passes all 142 tests. Zero regressions. ✅
 
 ## Interfaces
 
-No new public types required. Internal types and function signatures:
-
 ```typescript
+// Existing (no changes)
 interface LoadedFeature {
   meta: FeatureMeta;
   descriptor: FeatureDescriptor;
+  validDeps: string[];           // NEW — pre-computed valid dependency IDs
 }
 
 interface DependencyGate {
@@ -142,13 +183,32 @@ interface TopoSortResult {
   prunedEdges: Set<string>;
 }
 
-function groupIntoWaves(sorted: FeatureMeta[], warn: LogFn): Map<number, FeatureMeta[]>
-function createDependencyGate(allFeatures: FeatureMeta[], matchedIds: Set<string>): DependencyGate
-function topoSort(matched: FeatureMeta[], warn: LogFn): TopoSortResult
+// NEW
+interface ExecutionContext {
+  knownIds: Set<string>;
+  gate: DependencyGate;
+  prunedEdges: Set<string>;
+  failedIds: Set<string>;
+  warn: LogFn;
+}
+
+interface LoadResult {
+  loaded: LoadedFeature[];
+  failedIds: Set<string>;
+}
+
+// Function signatures after refactor
+function resolveTimeout(raw: number | undefined, warn: LogFn): number
+function matchFeatures(features: FeatureMeta[], warn: LogFn): FeatureMeta[]  // no longer sorts
 function withTimeout<T>(promise: Promise<T>, ms: number, id: string, controller?: AbortController): Promise<T>
 function initFeature(feature: FeatureDescriptor, selectors: string[], signal?: AbortSignal): Promise<void>
-function runWithDeps(meta, descriptor, knownIds, gate, prunedEdges, warn, signal?): Promise<void>
-function dispatchWaves(waves, descriptorById, knownIds, gate, prunedEdges, globalTimeout, warn): Promise<void>
+function topoSort(matched: FeatureMeta[], warn: LogFn): TopoSortResult
+function groupIntoWaves(sorted: FeatureMeta[], warn: LogFn): Map<number, FeatureMeta[]>
+function createDependencyGate(allFeatures: FeatureMeta[], matchedIds: Set<string>): DependencyGate
+function buildValidDeps(meta: FeatureMeta, knownIds: Set<string>, prunedEdges: Set<string>, warn: LogFn): string[]  // NEW
+function loadChunks(sortedFeatures: FeatureMeta[], knownIds: Set<string>, prunedEdges: Set<string>, gate: DependencyGate, warn: LogFn): Promise<LoadResult>  // NEW — 5 params (bakes buildValidDeps inside to avoid second loop; deliberate deviation from 3-param plan)
+function runWithDeps(meta: FeatureMeta, descriptor: FeatureDescriptor, validDeps: string[], ctx: ExecutionContext, signal?: AbortSignal): Promise<void>  // REFACTORED — 5 params
+function dispatchWaves(waves: Map<number, FeatureMeta[]>, descriptorById: Map<string, FeatureDescriptor>, ctx: ExecutionContext, globalTimeout: number): Promise<void>  // REFACTORED — 4 params
 ```
 
 Existing public types (`FeatureMeta`, `FeatureDescriptor`, `LoaderOptions`) remain unchanged.
@@ -157,18 +217,20 @@ Existing public types (`FeatureMeta`, `FeatureDescriptor`, `LoaderOptions`) rema
 
 ### `src/loader.ts`
 
-| Function | Concern | Change |
+| Function | Concern | Status |
 |----------|---------|--------|
-| `resolveTimeout` | Validate timeout input | **New** — extracted from loadFeatures |
-| `matchFeatures` | Filter by DOM + sort by priority | None |
-| `withTimeout` | Race promise vs setTimeout + abort | **Simplified** — `ms: number`, optional `AbortController` |
-| `initFeature` | Per-feature lifecycle (onSetup→onEach→onReady) | **Modified** — optional `AbortSignal`, checks before each step |
-| `topoSort` | DFS topo-sort + cycle detection | **Modified** — returns `TopoSortResult` with `prunedEdges` |
-| **`groupIntoWaves`** | Group features by effective wave (priority + dep promotion) | **New** |
-| **`createDependencyGate`** | Pub/sub gate (readySet + depResolvers) | **New** — extracted, uses `Map<string, Set<>>` |
-| **`runWithDeps`** | Validate deps + wait + init | **New** — extracted, filters pruned edges + self-deps |
-| **`dispatchWaves`** | Wave iteration + concurrent dispatch | **New** — extracted, AbortController per feature |
-| `loadFeatures` | Orchestrator: match → sort → load → dispatch | **Refactored** — ~40 lines, delegates to extracted functions |
+| `resolveTimeout` | Validate timeout input | ✅ Done |
+| `matchFeatures` | Filter by DOM | ✅ Done — Step 14 removes sort |
+| `withTimeout` | Race promise vs setTimeout + abort | ✅ Done |
+| `initFeature` | Per-feature lifecycle (onSetup→onEach→onReady) | ✅ Done |
+| `topoSort` | DFS topo-sort + cycle detection | ✅ Done |
+| `groupIntoWaves` | Group features by effective wave | ✅ Done |
+| `createDependencyGate` | Pub/sub gate (readySet + depResolvers) | ✅ Done |
+| `buildValidDeps` | Pre-compute filtered dep list per feature | **New — Step 12** |
+| `loadChunks` | Parallel chunk loading + result processing | **New — Step 13** |
+| `runWithDeps` | Wait for deps + init | ✅ Done — Step 11+12 simplifies to 5 params |
+| `dispatchWaves` | Wave iteration + concurrent dispatch | ✅ Done — Step 11 simplifies to 4 params |
+| `loadFeatures` | Thin orchestrator | ✅ Done — Step 13 reduces to ~25 lines |
 
 ### `groupIntoWaves` detail
 
@@ -181,26 +243,40 @@ Maintain `effectiveWave: Map<string, number>` keyed by feature ID. Single-pass o
 4. If `wave !== feature.priority`, emit warning: `[loader] Feature "${id}" promoted from priority ${feature.priority} to wave ${wave} — depends on "${depId}" in later wave`
 5. Group into `Map<number, FeatureMeta[]>` keyed by effective wave
 
-### `loadFeatures` dispatch refactor
+### `buildValidDeps` detail (NEW)
 
-Replace lines 163-207:
-1. Pre-process: pair each `sorted[i]` with `results[i]`. Handle rejected loads (warn + markReady).
-2. Group successful loads into waves via `groupIntoWaves`.
-3. Get sorted wave keys: `[...waves.keys()].sort((a, b) => a - b)`
-4. For each wave: `await Promise.allSettled(waveFeatures.map(f => runFeature(f)))` where `runFeature` is the existing async closure (validate deps → waitForDependency → initFeature → markReady).
+Pre-computes the valid dependency list for a single feature. Runs once per loaded feature, not at dispatch time.
+
+1. Deduplicate: `[...new Set(meta.dependencies)]`
+2. Filter out self-deps: `depId === meta.id` → warn + skip
+3. Filter out unknown deps: `!knownIds.has(depId)` → warn + skip
+4. Filter out pruned edges: `prunedEdges.has(\`${meta.id}->${depId}\`)` → skip (already warned by topoSort)
+5. Return filtered array
+
+### `loadChunks` detail (NEW)
+
+Encapsulates the load + classify + dep-validation logic:
+
+1. `Promise.allSettled(sortedFeatures.map(f => f.load()))`
+2. For each result: if rejected → warn, add to `failedIds`, call `gate.markReady`; if fulfilled → push to `loaded[]` with `validDeps` computed via `buildValidDeps`
+3. Return `{ loaded, failedIds }`
+
+**Note:** The plan originally specified 3 params `(sortedFeatures, gate, warn)` with `buildValidDeps` called separately in `loadFeatures`. The implementation uses 5 params `(sortedFeatures, knownIds, prunedEdges, gate, warn)` to bake `buildValidDeps` inside, avoiding a second loop. This is a deliberate deviation — accepted during review.
 
 ## Acceptance Criteria (EARS)
 
-- **AC-1.** When features share the same priority value and have no mutual dependencies, the system shall initialize them concurrently within a single wave.
-- **AC-2.** When features have different priority values, the system shall execute lower-priority-value waves before higher-priority-value waves sequentially.
-- **AC-3.** When a feature declares dependencies, it shall wait for those specific dependencies to complete before its own initialization, regardless of wave placement.
-- **AC-4.** When multiple features depend on the same feature, all dependents shall be unblocked when that dependency completes.
-- **AC-5.** When a feature's declared dependency has a higher priority value (later wave), the system shall promote the feature to that wave and emit a warning matching the pattern: `[loader] Feature "${id}" promoted from priority N to wave M — depends on "${depId}" in later wave`.
-- **AC-6.** If a feature in a wave times out or fails, it shall not prevent other features in the same wave or subsequent waves from initializing. `markReady` shall fire in a `finally` block guaranteeing dependents unblock.
-- **AC-7.** When circular dependencies exist, the back-edge shall be pruned by `topoSort` and skipped by `runWithDeps`. Both features shall complete normally without timeout. A circular dependency warning shall be emitted.
-- **AC-8.** When a feature times out, its lifecycle shall be cancelled via `AbortSignal`. `onSetup` (if not yet started), `onEach`, and `onReady` shall not execute after abort.
-- **AC-9.** When a feature's dependency fails to load (chunk rejected), the system shall skip the dependent feature, emit a warning `Feature "${id}" skipped — dependency "${depId}" failed`, and propagate the failure to any feature depending on the skipped feature.
-- **AC-10.** All existing tests (except modified ordering/circular tests) shall pass without changes.
+- **AC-1.** When features share the same priority value and have no mutual dependencies, the system shall initialize them concurrently within a single wave. ✅
+- **AC-2.** When features have different priority values, the system shall execute lower-priority-value waves before higher-priority-value waves sequentially. ✅
+- **AC-3.** When a feature declares dependencies, it shall wait for those specific dependencies to complete before its own initialization, regardless of wave placement. ✅
+- **AC-4.** When multiple features depend on the same feature, all dependents shall be unblocked when that dependency completes. ✅
+- **AC-5.** When a feature's declared dependency has a higher priority value (later wave), the system shall promote the feature to that wave and emit a warning matching the pattern: `[loader] Feature "${id}" promoted from priority N to wave M — depends on "${depId}" in later wave`. ✅
+- **AC-6.** If a feature in a wave times out or fails, it shall not prevent other features in the same wave or subsequent waves from initializing. `markReady` shall fire in a `finally` block guaranteeing dependents unblock. ✅
+- **AC-7.** When circular dependencies exist, the back-edge shall be pruned by `topoSort` and skipped by `runWithDeps`. Both features shall complete normally without timeout. A circular dependency warning shall be emitted. ✅
+- **AC-8.** When a feature times out, its lifecycle shall be cancelled via `AbortSignal`. `onSetup` (if not yet started), `onEach`, and `onReady` shall not execute after abort. ✅
+- **AC-9.** When a feature's dependency fails to load (chunk rejected), the system shall skip the dependent feature, emit a warning `Feature "${id}" skipped — dependency "${depId}" failed`, and propagate the failure to any feature depending on the skipped feature. ✅
+- **AC-10.** All existing tests (except modified ordering/circular tests) shall pass without changes. ✅
+- **AC-11.** [NEW] After refactoring, no function in `loader.ts` shall have more than 5 parameters. Behavior unchanged — all 139+ tests pass.
+- **AC-12.** [NEW] Dependency validation (self-dep, unknown-dep, pruned-edge) shall run once per feature during pre-computation, not at dispatch time.
 
 ## Out of Scope
 
@@ -223,24 +299,33 @@ Replace lines 163-207:
 | 7b | Cascading dep failure (A→B→C, A fails) | [discovered during implementation] | A's chunk fails → B skipped (dep A failed) → C skipped (dep B failed). Each emits a "skipped" warning. Non-dependents in the same wave run normally. |
 | 8 | Worst-in-wave stall (1 slow, 9 fast) | [from issue] | Next wave blocked until slowest feature settles. Bounded by per-feature `timeout`. Consumers can set tight timeouts on known-slow features. |
 | 9 | Timeout covers dep-wait in parallel | [from issue] | `withTimeout` wraps entire `run()` (dep-wait + lifecycle). In sequential mode, deps completed before timeout started. In wave mode, within-wave dep-wait consumes real timeout budget. Semantic change — document in changelog. |
-| 10 | `enabled: false` on descriptor | [inferred] | `initFeature` returns early (L61). Feature's async task completes normally. `markReady` fires. Dependents unblock. |
-| 11 | `onSetup` returns `false` (abort) | [inferred] | `initFeature` skips onEach/onReady, returns normally (L66). `markReady` fires. Dependents unblock. |
+| 10 | `enabled: false` on descriptor | [inferred] | `initFeature` returns early (L82). Feature's async task completes normally. `markReady` fires. Dependents unblock. |
+| 11 | `onSetup` returns `false` (abort) | [inferred] | `initFeature` skips onEach/onReady, returns normally (L88). `markReady` fires. Dependents unblock. |
 | 12 | Cascading promotion: A(p=1,deps=[B]), B(p=5,deps=[C]), C(p=10) | [inferred] | Single-pass in topoSort order: C processed first → wave 10. B next → `max(5, 10)` = wave 10. A last → `max(1, 10)` = wave 10. All three land in wave 10. Two promotion warnings emitted. |
 | 13 | Intra-wave dep: A and B same priority, B deps on A | [inferred] | Both in same wave. Both launch concurrently. B calls `waitForDependency('A')`. A runs lifecycle, calls `markReady`. B unblocks. Wave completes when both settle. |
-| 14 | Empty features array / no DOM matches | [inferred] | Returns early at existing L131. No change needed. |
+| 14 | Empty features array / no DOM matches | [inferred] | Returns early at existing L322-323. No change needed. |
+| 15 | [NEW] `buildValidDeps` emits self-dep warning once | [discovered during review] | Pre-computation ensures warning fires during setup, not during dispatch. No duplicate warnings if feature appears in multiple waves (it can't — features belong to exactly one wave). |
+| 16 | [NEW] Runtime failure (onSetup/onEach/onReady throws) cascades to dependents | [discovered during code-attacker review] | `dispatchWaves` catch block adds to `failedIds` before logging. Dependents check `failedIds` after gate unblocks and skip if failed. Cascades through chain just like chunk-load failure. |
+| 17 | [NEW] Timeout fires mid-`onEach` loop — remaining iterations and `onReady` skipped | [discovered during code-reviewer review] | `initFeature` checks `signal?.aborted` before each `onEach` call (L103). AbortController.abort() fires on timeout, all subsequent lifecycle steps are skipped. |
+| 18 | [NEW] NaN timeout value | [discovered during code-attacker review] | `resolveTimeout` guards against `NaN` via `Number.isNaN(timeout)` — falls back to default with warning. Prevents instant timeout (setTimeout with NaN delay fires at 0ms). |
 
 ## Done Criteria per Feature
 
 | Feature | Done when ACs pass |
 |---------|-------------------|
-| Resolver Set fix | AC-4, AC-6 |
-| Wave grouping (`groupIntoWaves`) | AC-1, AC-2, AC-5 |
-| Concurrent dispatch (wave loop) | AC-1, AC-3, AC-6 |
-| Cross-wave dependency promotion | AC-5 |
-| Pruned-edge cycle resolution | AC-7 |
-| AbortController cancellation | AC-8 |
-| Dependency failure propagation | AC-9 |
-| Test updates | AC-10 |
+| ~~Resolver Set fix~~ ✅ | AC-4, AC-6 |
+| ~~Wave grouping (`groupIntoWaves`)~~ ✅ | AC-1, AC-2, AC-5 |
+| ~~Concurrent dispatch (wave loop)~~ ✅ | AC-1, AC-3, AC-6 |
+| ~~Cross-wave dependency promotion~~ ✅ | AC-5 |
+| ~~Pruned-edge cycle resolution~~ ✅ | AC-7 |
+| ~~AbortController cancellation~~ ✅ | AC-8 |
+| ~~Dependency failure propagation~~ ✅ | AC-9 |
+| ~~Test updates~~ ✅ | AC-10 |
+| ExecutionContext extraction (Step 11) | AC-11 |
+| Pre-compute valid deps (Step 12) | AC-11, AC-12 |
+| Extract loadChunks (Step 13) | AC-11 |
+| Separate match from sort (Step 14) | AC-11 |
+| DRY test helpers (Step 15) | AC-11 |
 
 ## Risks
 
@@ -251,6 +336,7 @@ Replace lines 163-207:
 | 3 | Test flakiness from timing-dependent assertions in concurrency tests | Prefer call-order tracking (push to array inside onSetup mock, assert ordering after await) over `Date.now()` deltas. For concurrency proof, set a flag during slow feature's onSetup to verify fast already ran. |
 | 4 | Wave-level stall: a slow or hung feature blocks all subsequent waves until its timeout fires | Consumers must set per-feature timeouts on features that may hang. Document this requirement in changelog. Consider per-wave timeout as future option. |
 | 5 | Synchronous throw in per-feature wave closure escapes `Promise.allSettled` if not declared `async` | Each wave feature closure MUST be an `async` arrow function so any synchronous throw becomes a rejected promise captured by `allSettled`. |
+| 6 | [NEW] Refactoring introduces subtle behavior change in warning emission order | Pre-computing `buildValidDeps` moves self-dep/unknown-dep warnings from dispatch-time to pre-computation. This changes the interleaving of warnings relative to "Feature X failed" or "Feature X promoted" messages. Since warnings are for debugging only (not part of the public API), this is acceptable. Mitigated by running the full test suite after each refactoring step. |
 
 ## Test Strategy
 
@@ -282,5 +368,11 @@ Replace lines 163-207:
   - Failure does not spread to non-dependents
   - Skips feature when any dependency in the list failed
   - (existing) Warns and continues when a chunk fails to load
-- **260 total tests**, all passing
+- **Added 3 new tests from review findings:**
+  - Runtime throw cascading to dependent (chunk load failure block)
+  - Runtime throw cascading through dependency chain (chunk load failure block)
+  - Timeout fires mid-`onEach` loop — remaining iterations and `onReady` skipped (wave-based block)
+- **50 total loader tests**, 142 total across all test files — all passing
 - **Concurrency verification:** Barrier pattern (Promise-based coordination) instead of setTimeout timing
+- **[NEW] Refactoring verification:** Each step (11-15) must preserve all 139+ tests. Run `vitest` after each step.
+- **[NEW] Review fix verification:** Steps 17-21 added 3 tests and fixed 3 bugs. All 142 tests pass.

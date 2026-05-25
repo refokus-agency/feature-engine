@@ -42,7 +42,13 @@ function makeLoadable(
   meta: Partial<FeatureMeta> = {},
 ): FeatureMeta {
   const full = makeDescriptor({ id, ...descriptor });
-  return makeMeta({ id, load: () => Promise.resolve({ default: full }), ...meta });
+  const derivedSelectors = full.selectors as string[];
+  return makeMeta({
+    id,
+    selectors: derivedSelectors,
+    load: () => Promise.resolve({ default: full }),
+    ...meta,
+  });
 }
 
 describe('loadFeatures', () => {
@@ -70,7 +76,7 @@ describe('loadFeatures', () => {
         makeLoadable(
           'hero',
           { onSetup, selectors: ['[data-hero]'] },
-          { selectors: ['[data-hero]'], priority: 1 },
+          { priority: 1 },
         ),
       ];
 
@@ -91,7 +97,7 @@ describe('loadFeatures', () => {
             onReady: () => { order.push('ready'); },
             selectors: ['[data-item]'],
           },
-          { selectors: ['[data-item]'], global: false, priority: 1 },
+          { global: false, priority: 1 },
         ),
       ];
 
@@ -111,7 +117,7 @@ describe('loadFeatures', () => {
             onEach: ({ ctx }) => { receivedCtx = ctx; },
             selectors: ['[data-x]'],
           },
-          { selectors: ['[data-x]'], priority: 1 },
+          { priority: 1 },
         ),
       ];
 
@@ -133,7 +139,7 @@ describe('loadFeatures', () => {
             },
             selectors: ['[data-el]'],
           },
-          { selectors: ['[data-el]'], priority: 1 },
+          { priority: 1 },
         ),
       ];
 
@@ -163,7 +169,7 @@ describe('loadFeatures', () => {
             onReady,
             selectors: ['[data-r]'],
           },
-          { selectors: ['[data-r]'], priority: 1 },
+          { priority: 1 },
         ),
       ];
 
@@ -187,8 +193,12 @@ describe('loadFeatures', () => {
   });
 
   describe('dependency ordering (topological sort)', () => {
+    let warnSpy: ReturnType<typeof vi.spyOn>;
+    beforeEach(() => {
+      warnSpy = vi.spyOn(console, 'warn').mockImplementation(noop);
+    });
+
     it('initializes dependencies before dependents', async () => {
-      vi.spyOn(console, 'warn').mockImplementation(noop);
       const order: string[] = [];
       const features = [
         makeLoadable('child', { onSetup: () => { order.push('child'); } }, { global: true, priority: 1, dependencies: ['parent'] }),
@@ -201,7 +211,6 @@ describe('loadFeatures', () => {
     });
 
     it('handles circular dependencies without throwing', async () => {
-      const warnSpy = vi.spyOn(console, 'warn').mockImplementation(noop);
       const aSetup = vi.fn();
       const bSetup = vi.fn();
       const features = [
@@ -219,7 +228,6 @@ describe('loadFeatures', () => {
     });
 
     it('resolves a deep 3-level dependency chain in correct order', async () => {
-      vi.spyOn(console, 'warn').mockImplementation(noop);
       const order: string[] = [];
       const features = [
         makeLoadable('c', { onSetup: () => { order.push('c'); } }, { global: true, priority: 1, dependencies: ['b'] }),
@@ -233,7 +241,6 @@ describe('loadFeatures', () => {
     });
 
     it('warns on unknown dependency and ignores it', async () => {
-      const warnSpy = vi.spyOn(console, 'warn').mockImplementation(noop);
       const onSetup = vi.fn();
       const features = [
         makeLoadable('feat', { onSetup }, { global: true, priority: 1, dependencies: ['nonexistent'] }),
@@ -249,8 +256,12 @@ describe('loadFeatures', () => {
   });
 
   describe('timeout', () => {
+    let warnSpy: ReturnType<typeof vi.spyOn>;
+    beforeEach(() => {
+      warnSpy = vi.spyOn(console, 'warn').mockImplementation(noop);
+    });
+
     it('rejects a feature that exceeds its timeout', async () => {
-      const warnSpy = vi.spyOn(console, 'warn').mockImplementation(noop);
       const features = [
         makeLoadable(
           'slow',
@@ -268,7 +279,6 @@ describe('loadFeatures', () => {
     });
 
     it('continues to next feature after timeout (AC-5)', async () => {
-      const warnSpy = vi.spyOn(console, 'warn').mockImplementation(noop);
       const nextSetup = vi.fn();
       const features = [
         makeLoadable(
@@ -289,7 +299,6 @@ describe('loadFeatures', () => {
     });
 
     it('uses global timeout when per-feature timeout is null', async () => {
-      const warnSpy = vi.spyOn(console, 'warn').mockImplementation(noop);
       const features = [
         makeLoadable(
           'slow',
@@ -307,7 +316,6 @@ describe('loadFeatures', () => {
     });
 
     it('does not apply timeout when timeout is 0', async () => {
-      const warnSpy = vi.spyOn(console, 'warn').mockImplementation(noop);
       let resolved = false;
       const features = [
         makeLoadable(
@@ -327,7 +335,6 @@ describe('loadFeatures', () => {
     });
 
     it('per-feature timeout overrides global timeout', async () => {
-      const warnSpy = vi.spyOn(console, 'warn').mockImplementation(noop);
       const onSetup = vi.fn(() => new Promise((resolve) => setTimeout(resolve, 120)));
       const features = [
         makeLoadable(
@@ -347,7 +354,6 @@ describe('loadFeatures', () => {
     });
 
     it('warns and uses default when global timeout is negative', async () => {
-      const warnSpy = vi.spyOn(console, 'warn').mockImplementation(noop);
       const onSetup = vi.fn();
       const features = [
         makeLoadable('feat', { onSetup }, { global: true, priority: 1 }),
@@ -356,15 +362,19 @@ describe('loadFeatures', () => {
       await loadFeatures(features, { timeout: -500 });
 
       expect(warnSpy).toHaveBeenCalledWith(
-        expect.stringContaining('Negative timeout'),
+        expect.stringContaining('Invalid timeout'),
       );
       expect(onSetup).toHaveBeenCalledOnce();
     });
   });
 
   describe('chunk load failure', () => {
+    let warnSpy: ReturnType<typeof vi.spyOn>;
+    beforeEach(() => {
+      warnSpy = vi.spyOn(console, 'warn').mockImplementation(noop);
+    });
+
     it('warns and continues when a chunk fails to load', async () => {
-      const warnSpy = vi.spyOn(console, 'warn').mockImplementation(noop);
       const onSetup = vi.fn();
       const features: FeatureMeta[] = [
         makeMeta({
@@ -386,7 +396,6 @@ describe('loadFeatures', () => {
     });
 
     it('skips dependent feature when a chunk fails to load', async () => {
-      const warnSpy = vi.spyOn(console, 'warn').mockImplementation(noop);
       const onSetup = vi.fn();
       const features: FeatureMeta[] = [
         makeMeta({
@@ -411,7 +420,6 @@ describe('loadFeatures', () => {
     });
 
     it('cascades failure through dependency chain', async () => {
-      vi.spyOn(console, 'warn').mockImplementation(noop);
       const bSetup = vi.fn();
       const cSetup = vi.fn();
       const features: FeatureMeta[] = [
@@ -432,7 +440,6 @@ describe('loadFeatures', () => {
     });
 
     it('failure does not spread to non-dependents', async () => {
-      vi.spyOn(console, 'warn').mockImplementation(noop);
       const depSetup = vi.fn();
       const indepSetup = vi.fn();
       const features: FeatureMeta[] = [
@@ -452,8 +459,34 @@ describe('loadFeatures', () => {
       expect(indepSetup).toHaveBeenCalledOnce();
     });
 
+    it('cascades failure when onSetup throws at runtime', async () => {
+      const bSetup = vi.fn();
+      const features = [
+        makeLoadable('a', { onSetup: () => { throw new Error('runtime'); } }, { global: true, priority: 1 }),
+        makeLoadable('b', { onSetup: bSetup }, { global: true, priority: 2, dependencies: ['a'] }),
+      ];
+
+      await loadFeatures(features);
+
+      expect(bSetup).not.toHaveBeenCalled();
+    });
+
+    it('cascades runtime failure through dependency chain', async () => {
+      const bSetup = vi.fn();
+      const cSetup = vi.fn();
+      const features = [
+        makeLoadable('a', { onSetup: () => { throw new Error('runtime'); } }, { global: true, priority: 1 }),
+        makeLoadable('b', { onSetup: bSetup }, { global: true, priority: 2, dependencies: ['a'] }),
+        makeLoadable('c', { onSetup: cSetup }, { global: true, priority: 3, dependencies: ['b'] }),
+      ];
+
+      await loadFeatures(features);
+
+      expect(bSetup).not.toHaveBeenCalled();
+      expect(cSetup).not.toHaveBeenCalled();
+    });
+
     it('skips feature when any dependency in the list failed', async () => {
-      vi.spyOn(console, 'warn').mockImplementation(noop);
       const onSetup = vi.fn();
       const features: FeatureMeta[] = [
         makeLoadable('ok', { onSetup: noop }, { global: true, priority: 1 }),
@@ -505,7 +538,7 @@ describe('loadFeatures', () => {
             onReady,
             selectors: ['[data-x]'],
           },
-          { selectors: ['[data-x]'], priority: 1 },
+          { priority: 1 },
         ),
       ];
 
@@ -573,7 +606,7 @@ describe('loadFeatures', () => {
             onEach: ({ ctx }: { ctx: unknown }) => { receivedCtx = ctx; },
             selectors: ['[data-u]'],
           },
-          { selectors: ['[data-u]'], priority: 1 },
+          { priority: 1 },
         ),
       ];
 
@@ -611,7 +644,7 @@ describe('loadFeatures', () => {
             onReady,
             selectors: ['[data-missing]'],
           },
-          { selectors: ['[data-missing]'], priority: 1 },
+          { priority: 1 },
         ),
       ];
 
@@ -682,6 +715,11 @@ describe('loadFeatures', () => {
   });
 
   describe('wave-based concurrent dispatch', () => {
+    let warnSpy: ReturnType<typeof vi.spyOn>;
+    beforeEach(() => {
+      warnSpy = vi.spyOn(console, 'warn').mockImplementation(noop);
+    });
+
     it('runs same-priority features concurrently', async () => {
       let barrierResolve: () => void;
       const barrier = new Promise<void>((r) => { barrierResolve = r; });
@@ -747,7 +785,6 @@ describe('loadFeatures', () => {
     });
 
     it('promotes feature to later wave when it depends on a higher-priority feature', async () => {
-      const warnSpy = vi.spyOn(console, 'warn').mockImplementation(noop);
       const order: string[] = [];
       const features = [
         makeLoadable('early', { onSetup: () => { order.push('early'); } }, { global: true, priority: 1, dependencies: ['late'] }),
@@ -797,7 +834,6 @@ describe('loadFeatures', () => {
     });
 
     it('completes circular pair and dependents without timeout', async () => {
-      vi.spyOn(console, 'warn').mockImplementation(noop);
       const aSetup = vi.fn();
       const bSetup = vi.fn();
       const cSetup = vi.fn();
@@ -839,7 +875,6 @@ describe('loadFeatures', () => {
     });
 
     it('warns and ignores self-dependency', async () => {
-      const warnSpy = vi.spyOn(console, 'warn').mockImplementation(noop);
       const onSetup = vi.fn();
       const features = [
         makeLoadable('self-dep', { onSetup }, { global: true, priority: 1, dependencies: ['self-dep'] }),
@@ -854,7 +889,6 @@ describe('loadFeatures', () => {
     });
 
     it('cascades promotion across 3 levels', async () => {
-      const warnSpy = vi.spyOn(console, 'warn').mockImplementation(noop);
       const order: string[] = [];
       const features = [
         makeLoadable('a', { onSetup: () => { order.push('a'); } }, { global: true, priority: 1, dependencies: ['b'] }),
@@ -872,7 +906,6 @@ describe('loadFeatures', () => {
     });
 
     it('3-node cycle completes without relying on timeout', async () => {
-      vi.spyOn(console, 'warn').mockImplementation(noop);
       const xSetup = vi.fn();
       const ySetup = vi.fn();
       const zSetup = vi.fn();
@@ -890,7 +923,6 @@ describe('loadFeatures', () => {
     });
 
     it('does not run onReady after timeout fires during onSetup', async () => {
-      vi.spyOn(console, 'warn').mockImplementation(noop);
       const onReady = vi.fn();
       const features = [
         makeLoadable('slow', {
@@ -905,8 +937,29 @@ describe('loadFeatures', () => {
       expect(onReady).not.toHaveBeenCalled();
     });
 
+    it('does not run remaining onEach or onReady after timeout fires mid-loop', async () => {
+      document.body.innerHTML = '<div data-t></div><div data-t></div><div data-t></div>';
+      const onEach = vi.fn(
+        () => new Promise((resolve) => setTimeout(resolve, 100)),
+      );
+      const onReady = vi.fn();
+      const features = [
+        makeLoadable('slow-each', {
+          onSetup: noop,
+          onEach,
+          onReady,
+          selectors: ['[data-t]'],
+        }, { priority: 1, timeout: 50 }),
+      ];
+
+      await loadFeatures(features);
+
+      await new Promise((r) => setTimeout(r, 350));
+      expect(onEach.mock.calls.length).toBeLessThanOrEqual(1);
+      expect(onReady).not.toHaveBeenCalled();
+    });
+
     it('does not run onSetup after timeout fires during dep wait', async () => {
-      vi.spyOn(console, 'warn').mockImplementation(noop);
       const onSetup = vi.fn();
       const features = [
         makeLoadable('blocker', {
@@ -924,7 +977,6 @@ describe('loadFeatures', () => {
     });
 
     it('pruned circular dep does not affect non-circular deps', async () => {
-      vi.spyOn(console, 'warn').mockImplementation(noop);
       const order: string[] = [];
       const features = [
         makeLoadable('a', { onSetup: () => { order.push('a'); } }, { global: true, priority: 1, dependencies: ['b', 'c'] }),

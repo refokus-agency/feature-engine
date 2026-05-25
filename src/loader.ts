@@ -7,6 +7,7 @@ type LogFn = (message: string, ...args: unknown[]) => void;
 interface LoadedFeature {
   meta: FeatureMeta;
   descriptor: FeatureDescriptor;
+  validDeps: string[];
 }
 
 interface DependencyGate {
@@ -14,11 +15,19 @@ interface DependencyGate {
   waitForDependency: (id: string) => Promise<void>;
 }
 
+interface ExecutionContext {
+  knownIds: Set<string>;
+  gate: DependencyGate;
+  prunedEdges: Set<string>;
+  failedIds: Set<string>;
+  warn: LogFn;
+}
+
 function resolveTimeout(raw: number | undefined, warn: LogFn): number {
   const timeout = raw ?? DEFAULT_TIMEOUT_MS;
-  if (timeout < 0) {
+  if (timeout < 0 || Number.isNaN(timeout)) {
     warn(
-      `[loader] Negative timeout (${timeout}ms) is invalid — using default ${DEFAULT_TIMEOUT_MS}ms`,
+      `[loader] Invalid timeout (${timeout}ms) — using default ${DEFAULT_TIMEOUT_MS}ms`,
     );
     return DEFAULT_TIMEOUT_MS;
   }
@@ -48,7 +57,6 @@ function matchFeatures(features: FeatureMeta[], warn: LogFn): FeatureMeta[] {
     }
   }
 
-  matched.sort((a, b) => a.priority - b.priority);
   return matched;
 }
 
@@ -145,17 +153,18 @@ function topoSort(matched: FeatureMeta[], warn: LogFn): TopoSortResult {
 }
 
 function groupIntoWaves(
-  sorted: FeatureMeta[],
+  loaded: LoadedFeature[],
   warn: LogFn,
-): Map<number, FeatureMeta[]> {
+): Map<number, LoadedFeature[]> {
   const effectiveWave = new Map<string, number>();
-  const waves = new Map<number, FeatureMeta[]>();
+  const waves = new Map<number, LoadedFeature[]>();
 
-  for (const feature of sorted) {
-    let wave = feature.priority;
+  for (const feature of loaded) {
+    const { id, priority, dependencies } = feature.meta;
+    let wave = priority;
     let promotedBy: string | undefined;
 
-    for (const depId of feature.dependencies) {
+    for (const depId of dependencies) {
       const depWave = effectiveWave.get(depId);
       if (depWave !== undefined && depWave > wave) {
         wave = depWave;
@@ -163,11 +172,11 @@ function groupIntoWaves(
       }
     }
 
-    effectiveWave.set(feature.id, wave);
+    effectiveWave.set(id, wave);
 
-    if (wave !== feature.priority && promotedBy) {
+    if (wave !== priority && promotedBy) {
       warn(
-        `[loader] Feature "${feature.id}" promoted from priority ${feature.priority} to wave ${wave} — depends on "${promotedBy}" in later wave`,
+        `[loader] Feature "${id}" promoted from priority ${priority} to wave ${wave} — depends on "${promotedBy}" in later wave`,
       );
     }
 
@@ -220,44 +229,46 @@ function createDependencyGate(
   return { markReady, waitForDependency };
 }
 
-async function runWithDeps(
+function buildValidDeps(
   meta: FeatureMeta,
-  descriptor: FeatureDescriptor,
   knownIds: Set<string>,
-  gate: DependencyGate,
   prunedEdges: Set<string>,
-  failedIds: Set<string>,
   warn: LogFn,
+): string[] {
+  if (!meta.dependencies.length) return [];
+  return [...new Set(meta.dependencies)].filter((depId) => {
+    if (depId === meta.id) {
+      warn(`[loader] Feature "${meta.id}" depends on itself — ignoring`);
+      return false;
+    }
+    if (!knownIds.has(depId)) {
+      warn(
+        `[loader] Feature "${meta.id}" depends on unknown "${depId}" — ignoring`,
+      );
+      return false;
+    }
+    if (prunedEdges.has(`${meta.id}->${depId}`)) {
+      return false;
+    }
+    return true;
+  });
+}
+
+async function runWithDeps(
+  { meta, descriptor, validDeps }: LoadedFeature,
+  ctx: ExecutionContext,
   signal?: AbortSignal,
 ): Promise<void> {
-  if (meta.dependencies.length) {
-    const validDeps = [...new Set(meta.dependencies)].filter((depId) => {
-      if (depId === meta.id) {
-        warn(`[loader] Feature "${meta.id}" depends on itself — ignoring`);
-        return false;
-      }
-      if (!knownIds.has(depId)) {
-        warn(
-          `[loader] Feature "${meta.id}" depends on unknown "${depId}" — ignoring`,
-        );
-        return false;
-      }
-      if (prunedEdges.has(`${meta.id}->${depId}`)) {
-        return false;
-      }
-      return true;
-    });
-    if (validDeps.length) {
-      await Promise.all(validDeps.map(gate.waitForDependency));
+  if (validDeps.length) {
+    await Promise.all(validDeps.map(ctx.gate.waitForDependency));
 
-      const failedDep = validDeps.find((d) => failedIds.has(d));
-      if (failedDep) {
-        warn(
-          `[loader] Feature "${meta.id}" skipped — dependency "${failedDep}" failed`,
-        );
-        failedIds.add(meta.id);
-        return;
-      }
+    const failedDep = validDeps.find((d) => ctx.failedIds.has(d));
+    if (failedDep) {
+      ctx.warn(
+        `[loader] Feature "${meta.id}" skipped — dependency "${failedDep}" failed`,
+      );
+      ctx.failedIds.add(meta.id);
+      return;
     }
   }
 
@@ -265,14 +276,9 @@ async function runWithDeps(
 }
 
 async function dispatchWaves(
-  waves: Map<number, FeatureMeta[]>,
-  descriptorById: Map<string, FeatureDescriptor>,
-  knownIds: Set<string>,
-  gate: DependencyGate,
-  prunedEdges: Set<string>,
-  failedIds: Set<string>,
+  waves: Map<number, LoadedFeature[]>,
+  ctx: ExecutionContext,
   globalTimeout: number,
-  warn: LogFn,
 ): Promise<void> {
   const sortedWaves = [...waves.keys()].sort((a, b) => a - b);
 
@@ -280,32 +286,69 @@ async function dispatchWaves(
     const waveFeatures = waves.get(waveKey)!;
 
     await Promise.allSettled(
-      waveFeatures.map(async (meta) => {
-        const descriptor = descriptorById.get(meta.id)!;
+      waveFeatures.map(async (feature) => {
         const controller = new AbortController();
         try {
-          const effectiveTimeout = meta.timeout ?? globalTimeout;
+          const effectiveTimeout = feature.meta.timeout ?? globalTimeout;
 
-          if (meta.dependencies.length && effectiveTimeout <= 0) {
-            warn(
-              `[loader] Feature "${meta.id}" has dependencies but timeout is disabled — deadlock risk if circular`,
+          if (feature.validDeps.length && effectiveTimeout <= 0) {
+            ctx.warn(
+              `[loader] Feature "${feature.meta.id}" has dependencies but timeout is disabled — deadlock risk if circular`,
             );
           }
 
           await withTimeout(
-            runWithDeps(meta, descriptor, knownIds, gate, prunedEdges, failedIds, warn, controller.signal),
+            runWithDeps(feature, ctx, controller.signal),
             effectiveTimeout,
-            meta.id,
+            feature.meta.id,
             controller,
           );
         } catch (err) {
-          warn(`[loader] Feature "${meta.id}" failed:`, err);
+          ctx.failedIds.add(feature.meta.id);
+          ctx.warn(`[loader] Feature "${feature.meta.id}" failed:`, err);
         } finally {
-          gate.markReady(meta.id);
+          ctx.gate.markReady(feature.meta.id);
         }
       }),
     );
   }
+}
+
+interface LoadResult {
+  loaded: LoadedFeature[];
+  failedIds: Set<string>;
+}
+
+async function loadChunks(
+  sortedFeatures: FeatureMeta[],
+  knownIds: Set<string>,
+  prunedEdges: Set<string>,
+  gate: DependencyGate,
+  warn: LogFn,
+): Promise<LoadResult> {
+  const results = await Promise.allSettled(sortedFeatures.map((f) => f.load()));
+  const failedIds = new Set<string>();
+  const loaded: LoadedFeature[] = [];
+
+  for (let i = 0; i < results.length; i++) {
+    const result = results[i]!;
+    const meta = sortedFeatures[i]!;
+
+    if (result.status === 'rejected') {
+      warn(`[loader] Failed to load feature "${meta.id}":`, result.reason);
+      failedIds.add(meta.id);
+      gate.markReady(meta.id);
+      continue;
+    }
+
+    loaded.push({
+      meta,
+      descriptor: result.value.default,
+      validDeps: buildValidDeps(meta, knownIds, prunedEdges, warn),
+    });
+  }
+
+  return { loaded, failedIds };
 }
 
 export async function loadFeatures(
@@ -322,36 +365,19 @@ export async function loadFeatures(
   const matchedFeatures = matchFeatures(features, warn);
   if (!matchedFeatures.length) return;
 
-  const { sorted: sortedFeatures, prunedEdges } = topoSort(matchedFeatures, warn);
+  matchedFeatures.sort((a, b) => a.priority - b.priority);
 
-  const results = await Promise.allSettled(sortedFeatures.map((f) => f.load()));
+  const { sorted: sortedFeatures, prunedEdges } = topoSort(matchedFeatures, warn);
 
   const matchedIds = new Set(sortedFeatures.map((f) => f.id));
   const knownIds = new Set(features.map((f) => f.id));
   const gate = createDependencyGate(features, matchedIds);
 
-  const failedIds = new Set<string>();
-  const loaded: LoadedFeature[] = [];
-  for (let i = 0; i < results.length; i++) {
-    const result = results[i]!;
-    const meta = sortedFeatures[i]!;
+  const { loaded, failedIds } = await loadChunks(sortedFeatures, knownIds, prunedEdges, gate, warn);
 
-    if (result.status === 'rejected') {
-      warn(`[loader] Failed to load feature "${meta.id}":`, result.reason);
-      failedIds.add(meta.id);
-      gate.markReady(meta.id);
-      continue;
-    }
+  const ctx: ExecutionContext = { knownIds, gate, prunedEdges, failedIds, warn };
 
-    loaded.push({ meta, descriptor: result.value.default });
-  }
+  const waves = groupIntoWaves(loaded, warn);
 
-  const waves = groupIntoWaves(
-    loaded.map((f) => f.meta),
-    warn,
-  );
-
-  const descriptorById = new Map(loaded.map((f) => [f.meta.id, f.descriptor]));
-
-  await dispatchWaves(waves, descriptorById, knownIds, gate, prunedEdges, failedIds, globalTimeout, warn);
+  await dispatchWaves(waves, ctx, globalTimeout);
 }
