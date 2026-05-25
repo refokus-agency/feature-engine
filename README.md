@@ -110,7 +110,7 @@ Loads and executes features in dependency order.
 1. **Match** — global features always match; others require at least one selector present in the DOM
 2. **Sort** — topological sort by dependencies, then by priority
 3. **Load** — lazy-import all matched features in parallel (`Promise.allSettled`)
-4. **Execute** — run each feature's lifecycle sequentially in sorted order, awaiting dependencies
+4. **Execute** — group features into priority waves. Features within each wave run in parallel (`Promise.allSettled`), respecting inter-feature dependencies via a dependency gate. Waves execute sequentially (lower priority first). If a dependency fails, its dependents are skipped
 
 ### `featureMetadataPlugin(options?): Plugin`
 
