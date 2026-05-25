@@ -1,3 +1,10 @@
+# [1.2.0](https://github.com/refokus-agency/feature-engine/compare/v1.1.0...v1.2.0) (2026-05-25)
+
+
+### Features
+
+* add smoke tests and performance benchmarks for parallel loader ([#24](https://github.com/refokus-agency/feature-engine/issues/24)) ([9de2ce6](https://github.com/refokus-agency/feature-engine/commit/9de2ce613f8bc777bda61a202a3fd5c1cf7a4b38))
+
 # [1.1.0](https://github.com/refokus-agency/feature-engine/compare/v1.0.1...v1.1.0) (2026-05-25)
 
 
