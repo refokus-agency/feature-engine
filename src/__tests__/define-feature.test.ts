@@ -333,14 +333,18 @@ describe('defineFeature', () => {
   // Compile-time assertions for the `expose` field and `OnSetupContext` second
   // argument (epic #34, issue #35). These tests must COMPILE under `tsc --strict`;
   // the runtime assertions are secondary. `npm run check-types` type-checks this
-  // file via `tsconfig.test.json` (which includes `src/__tests__/**`), so if any
+  // file via `tsconfig.eslint.json` (which includes `src/__tests__/**`), so if any
   // shape below stops type-checking, check-types fails — that is the authoritative gate.
   describe('expose + OnSetupContext types', () => {
-    it('accepts expose returning a projection object (AC-1)', () => {
-      const result = defineFeature(
-        minimal({ expose: (ctx) => ({ value: ctx }) }),
-      );
-      expect(typeof result.id).toBe('string');
+    it('forwards expose into the frozen descriptor (AC-1, #36 AC-8)', () => {
+      const expose = (ctx: unknown) => ({ value: ctx });
+      const result = defineFeature(minimal({ expose }));
+      expect(result.expose).toBe(expose);
+    });
+
+    it('leaves expose undefined when not provided (#36 AC-8)', () => {
+      const result = defineFeature(minimal());
+      expect(result.expose).toBeUndefined();
     });
 
     it('accepts expose returning false or null (AC-5)', () => {
