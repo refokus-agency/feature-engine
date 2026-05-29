@@ -92,7 +92,8 @@ async function initFeature(
 
   let ctx: unknown;
   if (feature.onSetup) {
-    ctx = await feature.onSetup(selectors);
+    const deps: Record<string, unknown> = {};
+    ctx = await feature.onSetup(selectors, { deps });
     if (ctx === false) return;
   }
 

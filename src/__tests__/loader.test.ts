@@ -940,7 +940,7 @@ describe('loadFeatures', () => {
     it('does not run remaining onEach or onReady after timeout fires mid-loop', async () => {
       document.body.innerHTML = '<div data-t></div><div data-t></div><div data-t></div>';
       const onEach = vi.fn(
-        () => new Promise((resolve) => setTimeout(resolve, 100)),
+        () => new Promise<void>((resolve) => setTimeout(resolve, 100)),
       );
       const onReady = vi.fn();
       const features = [
