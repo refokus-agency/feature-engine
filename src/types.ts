@@ -35,8 +35,7 @@ export interface FeatureDescriptor {
   onSetup: OnSetupFn | null;
   onEach: OnEachFn | null;
   onReady: OnReadyFn | null;
-  /** Public-API projection called after the lifecycle completes; its return value is exposed to dependents. `ctx` is `any` so callers can annotate it with the concrete `onSetup` return type. */
-  expose?: (ctx: any) => unknown;
+  expose: ((ctx: any) => unknown) | null;
 }
 
 /** User-facing input shape for `defineFeature()` — most fields are optional. */
@@ -51,8 +50,7 @@ export interface FeatureDescriptorInput {
   onSetup?: OnSetupFn | null;
   onEach?: OnEachFn | null;
   onReady?: OnReadyFn | null;
-  /** Public-API projection called after the lifecycle completes; its return value is exposed to dependents. `ctx` is `any` so callers can annotate it with the concrete `onSetup` return type. */
-  expose?: (ctx: any) => unknown;
+  expose?: ((ctx: any) => unknown) | null;
 }
 
 /** Static metadata with a lazy loader, used by `loadFeatures()` at runtime. */

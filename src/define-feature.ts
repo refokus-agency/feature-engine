@@ -81,6 +81,10 @@ export function defineFeature(
     throw new Error('[defineFeature] onReady must be a function');
   }
 
+  if (descriptor.expose && typeof descriptor.expose !== 'function') {
+    throw new Error('[defineFeature] expose must be a function');
+  }
+
   if (
     descriptor.dependencies !== undefined &&
     (!Array.isArray(descriptor.dependencies) ||
@@ -117,6 +121,6 @@ export function defineFeature(
     onSetup: descriptor.onSetup || null,
     onEach: descriptor.onEach || null,
     onReady: descriptor.onReady || null,
-    expose: descriptor.expose,
+    expose: descriptor.expose || null,
   });
 }
