@@ -6,6 +6,7 @@ export type {
   LoaderOptions,
   OnEachFn,
   OnReadyFn,
+  OnSetupContext,
   OnSetupFn,
 } from './types.ts';
 export { defineFeature } from './define-feature.ts';

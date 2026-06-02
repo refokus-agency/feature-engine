@@ -56,3 +56,5 @@ datasources/
 *.csv
 
 .npmrc
+
+.claude/worktrees

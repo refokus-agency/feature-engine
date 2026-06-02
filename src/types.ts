@@ -6,9 +6,15 @@ export interface FeatureEachContext {
   ctx: unknown;
 }
 
-/** Setup callback — receives matched selectors. Return `false` to abort; any other return value is passed as `ctx` to `onEach`. */
+/** Context object passed as the second argument to `onSetup`; `deps` maps a declared dependency's feature id to its exposed value. */
+export interface OnSetupContext {
+  deps: Record<string, unknown>;
+}
+
+/** Setup callback — receives matched selectors and a context of exposed dependencies. Return `false` to abort; any other return value is passed as `ctx` to `onEach`. */
 export type OnSetupFn = (
   selectors: string[],
+  context: OnSetupContext,
 ) => unknown | false | Promise<unknown | false>;
 
 /** Per-element callback — runs once for each element matching the feature selectors. */
@@ -29,6 +35,8 @@ export interface FeatureDescriptor {
   onSetup: OnSetupFn | null;
   onEach: OnEachFn | null;
   onReady: OnReadyFn | null;
+  /** Public-API projection called after the lifecycle completes; its return value is exposed to dependents. `ctx` is `any` so callers can annotate it with the concrete `onSetup` return type. */
+  expose?: (ctx: any) => unknown;
 }
 
 /** User-facing input shape for `defineFeature()` — most fields are optional. */
@@ -43,6 +51,8 @@ export interface FeatureDescriptorInput {
   onSetup?: OnSetupFn | null;
   onEach?: OnEachFn | null;
   onReady?: OnReadyFn | null;
+  /** Public-API projection called after the lifecycle completes; its return value is exposed to dependents. `ctx` is `any` so callers can annotate it with the concrete `onSetup` return type. */
+  expose?: (ctx: any) => unknown;
 }
 
 /** Static metadata with a lazy loader, used by `loadFeatures()` at runtime. */
