@@ -1031,6 +1031,37 @@ describe('loadFeatures — expose + deps (#36)', () => {
     expect(Object.keys(seenDeps!)).toEqual(['producer']);
   });
 
+  it('exposes only direct deps, not transitive ones, in an A→B→C chain (AC-1)', async () => {
+    let bDeps: Record<string, unknown> | undefined;
+    let cDeps: Record<string, unknown> | undefined;
+    const features = [
+      makeLoadable(
+        'a',
+        { onSetup: () => 'a-value', expose: (ctx) => ctx },
+        { global: true, priority: 1 },
+      ),
+      makeLoadable(
+        'b',
+        { onSetup: (_s, { deps }) => { bDeps = deps; return 'b-value'; }, expose: () => 'b-value' },
+        { global: true, priority: 2, dependencies: ['a'] },
+      ),
+      makeLoadable(
+        'c',
+        { onSetup: (_s, { deps }) => { cDeps = deps; } },
+        { global: true, priority: 3, dependencies: ['b'] },
+      ),
+    ];
+
+    await loadFeatures(features);
+
+    // B sees A (its direct dep).
+    expect(bDeps).toEqual({ a: 'a-value' });
+    // C declares a dep on B only, so it sees B's exposed value — but never A's (transitive).
+    expect(Object.keys(cDeps!)).toEqual(['b']);
+    expect(cDeps).toEqual({ b: 'b-value' });
+    expect(cDeps!).not.toHaveProperty('a');
+  });
+
   it('produces undefined for a dependency that defines no expose (AC-2)', async () => {
     let seenDeps: Record<string, unknown> | undefined;
     const features = [
