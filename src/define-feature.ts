@@ -117,5 +117,6 @@ export function defineFeature(
     onSetup: descriptor.onSetup || null,
     onEach: descriptor.onEach || null,
     onReady: descriptor.onReady || null,
+    expose: descriptor.expose,
   });
 }
