@@ -191,6 +191,16 @@ describe('defineFeature', () => {
       ).toThrow('[defineFeature] onReady must be a function');
     });
 
+    it('throws when expose is truthy but not a function', () => {
+      expect(() =>
+        defineFeature(
+          minimal({
+            expose: 'not a function' as unknown as FeatureDescriptorInput['expose'],
+          }),
+        ),
+      ).toThrow('[defineFeature] expose must be a function');
+    });
+
     it('throws when dependencies is not an array of strings', () => {
       expect(() =>
         defineFeature(
@@ -342,9 +352,9 @@ describe('defineFeature', () => {
       expect(result.expose).toBe(expose);
     });
 
-    it('leaves expose undefined when not provided (#36 AC-8)', () => {
+    it('normalizes expose to null when not provided (#36 AC-8)', () => {
       const result = defineFeature(minimal());
-      expect(result.expose).toBeUndefined();
+      expect(result.expose).toBeNull();
     });
 
     it('accepts expose returning false or null (AC-5)', () => {
