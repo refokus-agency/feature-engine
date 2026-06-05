@@ -1,3 +1,13 @@
+# [1.3.0](https://github.com/refokus-agency/feature-engine/compare/v1.2.0...v1.3.0) (2026-06-05)
+
+
+### Features
+
+* add .claude/worktrees to .gitignore ([e1c6184](https://github.com/refokus-agency/feature-engine/commit/e1c61849a421b7769d4adc6c328ec743e1365d80))
+* add expose and OnSetupContext types ([#35](https://github.com/refokus-agency/feature-engine/issues/35)) ([58b99e1](https://github.com/refokus-agency/feature-engine/commit/58b99e1802c0109bc739e1a98adf9f4dbde397c8))
+* implement expose and deps in loader ([#36](https://github.com/refokus-agency/feature-engine/issues/36)) ([1b2035c](https://github.com/refokus-agency/feature-engine/commit/1b2035ce0db28d57faa9ecc0c91ccedb42d733c4))
+* validate expose in defineFeature ([#37](https://github.com/refokus-agency/feature-engine/issues/37)) ([63f357e](https://github.com/refokus-agency/feature-engine/commit/63f357e0ea32c5e1400980f3df050f64eb7bb09d))
+
 # [1.2.0](https://github.com/refokus-agency/feature-engine/compare/v1.1.0...v1.2.0) (2026-05-25)
 
 
