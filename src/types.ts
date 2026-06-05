@@ -23,6 +23,11 @@ export type OnEachFn = (ctx: FeatureEachContext) => void | Promise<void>;
 /** Ready callback — runs after all elements have been processed. */
 export type OnReadyFn = () => void | Promise<void>;
 
+/** Public-API projection called after the lifecycle completes; its return value is
+ *  exposed to dependents. `ctx` is `any` so callers can annotate it with the concrete
+ *  `onSetup` return type. */
+export type ExposeFn = (ctx: any) => unknown;
+
 /** Frozen, normalized runtime descriptor returned by `defineFeature()`. */
 export interface FeatureDescriptor {
   id: string;
@@ -35,7 +40,7 @@ export interface FeatureDescriptor {
   onSetup: OnSetupFn | null;
   onEach: OnEachFn | null;
   onReady: OnReadyFn | null;
-  expose: ((ctx: any) => unknown) | null;
+  expose: ExposeFn | null;
 }
 
 /** User-facing input shape for `defineFeature()` — most fields are optional. */
@@ -50,7 +55,7 @@ export interface FeatureDescriptorInput {
   onSetup?: OnSetupFn | null;
   onEach?: OnEachFn | null;
   onReady?: OnReadyFn | null;
-  expose?: ((ctx: any) => unknown) | null;
+  expose?: ExposeFn | null;
 }
 
 /** Static metadata with a lazy loader, used by `loadFeatures()` at runtime. */
