@@ -1610,7 +1610,7 @@ describe('loadFeatures — expose + deps integration (#38)', () => {
     );
   });
 
-  it('delivers the exposed value when producer and consumer share a wave (AC-7, same-wave)', async () => {
+  it('delivers the exposed value when producer and consumer share a wave (AC-1, same-wave)', async () => {
     // Both at priority 1 → same wave → gated, concurrent. This is the only #38 shape that
     // exercises store-before-markReady through the real defineFeature seam (the cross-wave
     // tests above satisfy ordering trivially because wave 1 fully settles before wave 2).
