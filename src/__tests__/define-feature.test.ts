@@ -1,6 +1,8 @@
 import { describe, it, expect } from 'vitest';
 import { defineFeature } from '../define-feature.ts';
 import type { FeatureDescriptorInput } from '../types.ts';
+// AC-4: OnSetupContext and the updated OnSetupFn must be re-exported from the package entry point.
+import type { OnSetupContext, OnSetupFn } from '../index.ts';
 
 const noop = () => {};
 
@@ -189,6 +191,16 @@ describe('defineFeature', () => {
       ).toThrow('[defineFeature] onReady must be a function');
     });
 
+    it('throws when expose is truthy but not a function', () => {
+      expect(() =>
+        defineFeature(
+          minimal({
+            expose: 'not a function' as unknown as FeatureDescriptorInput['expose'],
+          }),
+        ),
+      ).toThrow('[defineFeature] expose must be a function');
+    });
+
     it('throws when dependencies is not an array of strings', () => {
       expect(() =>
         defineFeature(
@@ -325,6 +337,74 @@ describe('defineFeature', () => {
       const result = defineFeature(minimal({ dependencies }));
       dependencies.push('dep-b');
       expect([...result.dependencies]).toEqual(['dep-a']);
+    });
+  });
+
+  // Compile-time assertions for the `expose` field and `OnSetupContext` second
+  // argument (epic #34, issue #35). These tests must COMPILE under `tsc --strict`;
+  // the runtime assertions are secondary. `npm run check-types` type-checks this
+  // file via `tsconfig.eslint.json` (which includes `src/__tests__/**`), so if any
+  // shape below stops type-checking, check-types fails — that is the authoritative gate.
+  describe('expose + OnSetupContext types', () => {
+    it('forwards expose into the frozen descriptor (AC-1, #36 AC-8)', () => {
+      const expose = (ctx: unknown) => ({ value: ctx });
+      const result = defineFeature(minimal({ expose }));
+      expect(result.expose).toBe(expose);
+    });
+
+    it('normalizes expose to null when not provided (#36 AC-8)', () => {
+      const result = defineFeature(minimal());
+      expect(result.expose).toBeNull();
+    });
+
+    it('accepts expose returning false or null (AC-5)', () => {
+      const exposeFalse = defineFeature(minimal({ expose: () => false }));
+      const exposeNull = defineFeature(minimal({ expose: () => null }));
+      expect(exposeFalse.id).toBe('test-feature');
+      expect(exposeNull.id).toBe('test-feature');
+    });
+
+    it('accepts single-argument onSetup (AC-2 — backwards compatible)', () => {
+      const result = defineFeature(
+        minimal({ onSetup: (selectors) => ({ count: selectors.length }) }),
+      );
+      expect(result.id).toBe('test-feature');
+    });
+
+    it('accepts onSetup with a destructured deps context (AC-3)', () => {
+      const result = defineFeature(
+        minimal({
+          onSetup: (_selectors, { deps }) => {
+            // `deps` is typed Record<string, unknown> — index access compiles.
+            return { dep: deps['some-feature'] };
+          },
+        }),
+      );
+      expect(result.id).toBe('test-feature');
+    });
+
+    it('exposes OnSetupContext and OnSetupFn from the package entry point (AC-4)', () => {
+      const context: OnSetupContext = { deps: {} };
+      // OnSetupFn is also re-exported from the entry point and now takes the
+      // 2nd context arg with `deps` typed as Record<string, unknown>.
+      const setup: OnSetupFn = (selectors, { deps }) => ({
+        n: selectors.length,
+        dep: deps['some-feature'],
+      });
+      expect(context.deps).toEqual({});
+      expect(typeof setup).toBe('function');
+    });
+
+    it('accepts a typed expose param projecting a typed onSetup return (AC-1)', () => {
+      // Regression guard: `expose`'s param is `any`, so callers may annotate it
+      // with the concrete onSetup return type without a TS2322 contravariance error.
+      const result = defineFeature(
+        minimal({
+          onSetup: () => ({ token: 'abc' }),
+          expose: (ctx: { token: string }) => ctx.token,
+        }),
+      );
+      expect(result.id).toBe('test-feature');
     });
   });
 });

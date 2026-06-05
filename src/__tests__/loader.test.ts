@@ -1,6 +1,11 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { loadFeatures } from '../loader.ts';
-import type { FeatureDescriptor, FeatureMeta } from '../types.ts';
+import { defineFeature } from '../define-feature.ts';
+import type {
+  FeatureDescriptor,
+  FeatureDescriptorInput,
+  FeatureMeta,
+} from '../types.ts';
 
 const noop = () => {};
 
@@ -18,6 +23,7 @@ function makeDescriptor(
     onSetup: null,
     onEach: null,
     onReady: null,
+    expose: null,
     ...overrides,
   };
 }
@@ -49,6 +55,26 @@ function makeLoadable(
     load: () => Promise.resolve({ default: full }),
     ...meta,
   });
+}
+
+// Integration helper (#38): builds a loadable FeatureMeta from a REAL `defineFeature` descriptor,
+// exercising the full defineFeature → loadFeatures path (not a hand-built descriptor). The meta
+// fields are mirrored from the frozen descriptor so matching/waves/deps stay in sync.
+function defineLoadable(
+  input: FeatureDescriptorInput,
+  metaOverrides: Partial<FeatureMeta> = {},
+): FeatureMeta {
+  const descriptor = defineFeature(input);
+  return {
+    id: descriptor.id,
+    selectors: [...descriptor.selectors],
+    priority: descriptor.priority,
+    global: descriptor.global,
+    dependencies: [...descriptor.dependencies],
+    timeout: descriptor.timeout,
+    load: () => Promise.resolve({ default: descriptor }),
+    ...metaOverrides,
+  };
 }
 
 describe('loadFeatures', () => {
@@ -940,7 +966,7 @@ describe('loadFeatures', () => {
     it('does not run remaining onEach or onReady after timeout fires mid-loop', async () => {
       document.body.innerHTML = '<div data-t></div><div data-t></div><div data-t></div>';
       const onEach = vi.fn(
-        () => new Promise((resolve) => setTimeout(resolve, 100)),
+        () => new Promise<void>((resolve) => setTimeout(resolve, 100)),
       );
       const onReady = vi.fn();
       const features = [
@@ -991,5 +1017,676 @@ describe('loadFeatures', () => {
       expect(order).toContain('c');
       expect(order.indexOf('c')).toBeLessThan(order.indexOf('a'));
     });
+  });
+});
+
+describe('loadFeatures — expose + deps (#36)', () => {
+  let warnSpy: ReturnType<typeof vi.spyOn>;
+
+  beforeEach(() => {
+    document.body.innerHTML = '';
+    vi.restoreAllMocks();
+    warnSpy = vi.spyOn(console, 'warn').mockImplementation(noop);
+  });
+
+  it('passes only direct dependencies\' exposed values to onSetup (AC-1, AC-7)', async () => {
+    let seenDeps: Record<string, unknown> | undefined;
+    const features = [
+      makeLoadable(
+        'producer',
+        { onSetup: () => ({ token: 'abc' }), expose: (ctx) => ctx },
+        { global: true, priority: 1 },
+      ),
+      makeLoadable(
+        'unrelated',
+        { onSetup: () => 'x', expose: () => 'unrelated-value' },
+        { global: true, priority: 1 },
+      ),
+      makeLoadable(
+        'consumer',
+        { onSetup: (_s, { deps }) => { seenDeps = deps; } },
+        { global: true, priority: 2, dependencies: ['producer'] },
+      ),
+    ];
+
+    await loadFeatures(features);
+
+    // AC-7: the value was already present when consumer's onSetup ran (captured inside it).
+    expect(seenDeps).toEqual({ producer: { token: 'abc' } });
+    // AC-1: only the directly-declared dependency appears.
+    expect(Object.keys(seenDeps!)).toEqual(['producer']);
+  });
+
+  it('exposes only direct deps, not transitive ones, in an A→B→C chain (AC-1)', async () => {
+    let bDeps: Record<string, unknown> | undefined;
+    let cDeps: Record<string, unknown> | undefined;
+    const features = [
+      makeLoadable(
+        'a',
+        { onSetup: () => 'a-value', expose: (ctx) => ctx },
+        { global: true, priority: 1 },
+      ),
+      makeLoadable(
+        'b',
+        { onSetup: (_s, { deps }) => { bDeps = deps; return 'b-value'; }, expose: () => 'b-value' },
+        { global: true, priority: 2, dependencies: ['a'] },
+      ),
+      makeLoadable(
+        'c',
+        { onSetup: (_s, { deps }) => { cDeps = deps; } },
+        { global: true, priority: 3, dependencies: ['b'] },
+      ),
+    ];
+
+    await loadFeatures(features);
+
+    // B sees A (its direct dep).
+    expect(bDeps).toEqual({ a: 'a-value' });
+    // C declares a dep on B only, so it sees B's exposed value — but never A's (transitive).
+    expect(Object.keys(cDeps!)).toEqual(['b']);
+    expect(cDeps).toEqual({ b: 'b-value' });
+    expect(cDeps!).not.toHaveProperty('a');
+  });
+
+  it('produces undefined for a dependency that defines no expose (AC-2)', async () => {
+    let seenDeps: Record<string, unknown> | undefined;
+    const features = [
+      makeLoadable(
+        'producer',
+        { onSetup: () => ({ token: 'abc' }) }, // no expose
+        { global: true, priority: 1 },
+      ),
+      makeLoadable(
+        'consumer',
+        { onSetup: (_s, { deps }) => { seenDeps = deps; } },
+        { global: true, priority: 2, dependencies: ['producer'] },
+      ),
+    ];
+
+    await loadFeatures(features);
+
+    expect(Object.keys(seenDeps!)).toContain('producer');
+    expect(seenDeps!.producer).toBeUndefined();
+  });
+
+  it('does not call expose when onSetup returns false (AC-3)', async () => {
+    const expose = vi.fn(() => 'should-not-be-stored');
+    let seenDeps: Record<string, unknown> | undefined;
+    const features = [
+      makeLoadable(
+        'producer',
+        { onSetup: () => false, expose },
+        { global: true, priority: 1 },
+      ),
+      makeLoadable(
+        'consumer',
+        { onSetup: (_s, { deps }) => { seenDeps = deps; } },
+        { global: true, priority: 2, dependencies: ['producer'] },
+      ),
+    ];
+
+    await loadFeatures(features);
+
+    expect(expose).not.toHaveBeenCalled();
+    expect(seenDeps!.producer).toBeUndefined();
+  });
+
+  it('skips dependents when a dependency fails (AC-4)', async () => {
+    const consumerSetup = vi.fn();
+    const features = [
+      makeLoadable(
+        'producer',
+        { onSetup: () => { throw new Error('setup failed'); }, expose: () => 'v' },
+        { global: true, priority: 1, timeout: 100 },
+      ),
+      makeLoadable(
+        'consumer',
+        { onSetup: consumerSetup },
+        { global: true, priority: 2, dependencies: ['producer'], timeout: 100 },
+      ),
+    ];
+
+    await loadFeatures(features);
+
+    expect(consumerSetup).not.toHaveBeenCalled();
+    expect(warnSpy).toHaveBeenCalledWith(
+      expect.stringContaining('dependency "producer" failed'),
+    );
+  });
+
+  it('treats a feature whose expose throws as failed and skips its dependents (AC-5)', async () => {
+    const consumerSetup = vi.fn();
+    const features = [
+      makeLoadable(
+        'producer',
+        { onSetup: () => ({}), expose: () => { throw new Error('expose boom'); } },
+        { global: true, priority: 1, timeout: 100 },
+      ),
+      makeLoadable(
+        'consumer',
+        { onSetup: consumerSetup },
+        { global: true, priority: 2, dependencies: ['producer'], timeout: 100 },
+      ),
+    ];
+
+    await loadFeatures(features);
+
+    expect(consumerSetup).not.toHaveBeenCalled();
+    expect(warnSpy).toHaveBeenCalledWith(
+      expect.stringContaining('dependency "producer" failed'),
+    );
+  });
+
+  it('calls expose with undefined when there is no onSetup (AC-6)', async () => {
+    const expose = vi.fn(() => 'exposed-without-setup');
+    let seenDeps: Record<string, unknown> | undefined;
+    const features = [
+      makeLoadable(
+        'producer',
+        { expose }, // no onSetup, no onEach
+        { global: true, priority: 1 },
+      ),
+      makeLoadable(
+        'consumer',
+        { onSetup: (_s, { deps }) => { seenDeps = deps; } },
+        { global: true, priority: 2, dependencies: ['producer'] },
+      ),
+    ];
+
+    await loadFeatures(features);
+
+    expect(expose).toHaveBeenCalledWith(undefined);
+    expect(seenDeps!.producer).toBe('exposed-without-setup');
+  });
+
+  it('awaits an async expose and stores the resolved value, not the Promise (AC-9)', async () => {
+    let seenDeps: Record<string, unknown> | undefined;
+    const features = [
+      makeLoadable(
+        'producer',
+        { onSetup: () => ({}), expose: async () => 'resolved-value' },
+        { global: true, priority: 1 },
+      ),
+      makeLoadable(
+        'consumer',
+        { onSetup: (_s, { deps }) => { seenDeps = deps; } },
+        { global: true, priority: 2, dependencies: ['producer'] },
+      ),
+    ];
+
+    await loadFeatures(features);
+
+    expect(seenDeps!.producer).toBe('resolved-value');
+  });
+
+  it('serves the same exposed value to multiple dependents (AC-10)', async () => {
+    const value = { version: 1 };
+    let depsB: Record<string, unknown> | undefined;
+    let depsC: Record<string, unknown> | undefined;
+    const features = [
+      makeLoadable(
+        'a',
+        { onSetup: () => value, expose: (ctx) => ctx },
+        { global: true, priority: 1 },
+      ),
+      makeLoadable(
+        'b',
+        { onSetup: (_s, { deps }) => { depsB = deps; } },
+        { global: true, priority: 2, dependencies: ['a'] },
+      ),
+      makeLoadable(
+        'c',
+        { onSetup: (_s, { deps }) => { depsC = deps; } },
+        { global: true, priority: 2, dependencies: ['a'] },
+      ),
+    ];
+
+    await loadFeatures(features);
+
+    expect(depsB!.a).toBe(value);
+    expect(depsC!.a).toBe(value);
+    expect(depsB!.a).toBe(depsC!.a);
+  });
+
+  it('does not call expose for a disabled feature; dependents get undefined (AC-11)', async () => {
+    const expose = vi.fn(() => 'should-not-run');
+    let seenDeps: Record<string, unknown> | undefined;
+    const features = [
+      makeLoadable(
+        'producer',
+        { onSetup: () => ({}), expose, enabled: false },
+        { global: true, priority: 1 },
+      ),
+      makeLoadable(
+        'consumer',
+        { onSetup: (_s, { deps }) => { seenDeps = deps; } },
+        { global: true, priority: 2, dependencies: ['producer'] },
+      ),
+    ];
+
+    await loadFeatures(features);
+
+    expect(expose).not.toHaveBeenCalled();
+    expect(seenDeps!.producer).toBeUndefined();
+  });
+
+  it('stores false/null exposed values verbatim (edge: not an opt-out)', async () => {
+    let depsFalse: Record<string, unknown> | undefined;
+    let depsNull: Record<string, unknown> | undefined;
+    const features = [
+      makeLoadable(
+        'pf',
+        { onSetup: () => ({}), expose: () => false },
+        { global: true, priority: 1 },
+      ),
+      makeLoadable(
+        'pn',
+        { onSetup: () => ({}), expose: () => null },
+        { global: true, priority: 1 },
+      ),
+      makeLoadable(
+        'cf',
+        { onSetup: (_s, { deps }) => { depsFalse = deps; } },
+        { global: true, priority: 2, dependencies: ['pf'] },
+      ),
+      makeLoadable(
+        'cn',
+        { onSetup: (_s, { deps }) => { depsNull = deps; } },
+        { global: true, priority: 2, dependencies: ['pn'] },
+      ),
+    ];
+
+    await loadFeatures(features);
+
+    expect(depsFalse!.pf).toBe(false);
+    expect(depsNull!.pn).toBeNull();
+  });
+
+  it('omits the pruned edge from deps for a circular dependency (edge 11)', async () => {
+    let depsA: Record<string, unknown> | undefined;
+    let depsB: Record<string, unknown> | undefined;
+    const features = [
+      makeLoadable(
+        'a',
+        { onSetup: (_s, { deps }) => { depsA = deps; return {}; }, expose: (ctx) => ctx },
+        { global: true, priority: 1, dependencies: ['b'] },
+      ),
+      makeLoadable(
+        'b',
+        { onSetup: (_s, { deps }) => { depsB = deps; return {}; }, expose: (ctx) => ctx },
+        { global: true, priority: 2, dependencies: ['a'] },
+      ),
+    ];
+
+    await loadFeatures(features);
+
+    // `a` is visited first (lower priority), so the `b->a` edge is pruned:
+    // `b` sees no key for the pruned `a`, while `a`'s surviving edge to `b` is present.
+    expect(Object.keys(depsB!)).not.toContain('a');
+    expect(Object.keys(depsA!)).toContain('b');
+  });
+
+  it('delivers the exposed value across the gate when producer and consumer share a wave (AC-7)', async () => {
+    const value = { ready: true };
+    let seenValue: unknown = 'not-set';
+    const features = [
+      // Same priority → same wave → both run concurrently in one allSettled batch.
+      // The consumer is gated on the producer; this is the only shape that actually
+      // exercises store-before-markReady (cross-wave tests pass trivially).
+      makeLoadable(
+        'producer',
+        { onSetup: () => value, expose: (ctx) => ctx },
+        { global: true, priority: 1 },
+      ),
+      makeLoadable(
+        'consumer',
+        { onSetup: (_s, { deps }) => { seenValue = deps['producer']; } },
+        { global: true, priority: 1, dependencies: ['producer'] },
+      ),
+    ];
+
+    await loadFeatures(features);
+
+    expect(seenValue).toBe(value);
+  });
+
+  it('treats an async expose rejection as failure and skips dependents (AC-5, async)', async () => {
+    const consumerSetup = vi.fn();
+    const features = [
+      makeLoadable(
+        'producer',
+        {
+          onSetup: () => ({}),
+          expose: async () => {
+            throw new Error('async expose boom');
+          },
+        },
+        { global: true, priority: 1, timeout: 100 },
+      ),
+      makeLoadable(
+        'consumer',
+        { onSetup: consumerSetup },
+        { global: true, priority: 2, dependencies: ['producer'], timeout: 100 },
+      ),
+    ];
+
+    await loadFeatures(features);
+
+    expect(consumerSetup).not.toHaveBeenCalled();
+    expect(warnSpy).toHaveBeenCalledWith(
+      expect.stringContaining('dependency "producer" failed'),
+    );
+  });
+
+  it('passes an empty deps record to a feature with no dependencies', async () => {
+    let seenDeps: Record<string, unknown> | undefined;
+    const features = [
+      makeLoadable(
+        'solo',
+        { onSetup: (_s, { deps }) => { seenDeps = deps; } },
+        { global: true, priority: 1 },
+      ),
+    ];
+
+    await loadFeatures(features);
+
+    expect(seenDeps).toEqual({});
+    expect(Object.keys(seenDeps!)).toHaveLength(0);
+  });
+
+  it('delivers the exposed value when a dependent is promoted to its dependency\'s wave (AC-7, promotion)', async () => {
+    // The dependent declares a LOWER priority number than its dependency, so the loader
+    // promotes it from wave 1 to the dependency's wave (2) — both then run gated in the same
+    // wave. Verifies the exposed value still reaches the dependent after promotion.
+    const value = { promoted: true };
+    let seenValue: unknown = 'not-set';
+    const features = [
+      makeLoadable(
+        'consumer',
+        { onSetup: (_s, { deps }) => { seenValue = deps['producer']; } },
+        { global: true, priority: 1, dependencies: ['producer'] },
+      ),
+      makeLoadable(
+        'producer',
+        { onSetup: () => value, expose: (ctx) => ctx },
+        { global: true, priority: 2 },
+      ),
+    ];
+
+    await loadFeatures(features);
+
+    expect(seenValue).toBe(value);
+  });
+});
+
+// End-to-end tests through the REAL defineFeature → loadFeatures path (#38). Unlike the #36 block
+// (which builds descriptors directly), these prove the freeze pass-through carries `expose` through
+// defineFeature into the loader.
+describe('loadFeatures — expose + deps integration (#38)', () => {
+  let warnSpy: ReturnType<typeof vi.spyOn>;
+
+  beforeEach(() => {
+    document.body.innerHTML = '';
+    vi.restoreAllMocks();
+    warnSpy = vi.spyOn(console, 'warn').mockImplementation(noop);
+  });
+
+  it('passes a dependency\'s exposed value to the dependent via deps (AC-1)', async () => {
+    let seenDeps: Record<string, unknown> | undefined;
+    const features = [
+      defineLoadable({
+        id: 'producer',
+        selectors: [],
+        priority: 1,
+        global: true,
+        onSetup: () => ({ token: 'abc' }),
+        expose: (ctx) => ctx,
+      }),
+      defineLoadable({
+        id: 'consumer',
+        selectors: [],
+        priority: 2,
+        global: true,
+        dependencies: ['producer'],
+        onSetup: (_s, { deps }) => { seenDeps = deps; },
+      }),
+    ];
+
+    await loadFeatures(features);
+
+    expect(seenDeps).toEqual({ producer: { token: 'abc' } });
+  });
+
+  it('produces undefined in deps for a dependency without expose (AC-2)', async () => {
+    let seenDeps: Record<string, unknown> | undefined;
+    const features = [
+      defineLoadable({
+        id: 'producer',
+        selectors: [],
+        priority: 1,
+        global: true,
+        onSetup: () => ({ token: 'abc' }),
+      }),
+      defineLoadable({
+        id: 'consumer',
+        selectors: [],
+        priority: 2,
+        global: true,
+        dependencies: ['producer'],
+        onSetup: (_s, { deps }) => { seenDeps = deps; },
+      }),
+    ];
+
+    await loadFeatures(features);
+
+    expect(Object.keys(seenDeps!)).toContain('producer');
+    expect(seenDeps!.producer).toBeUndefined();
+  });
+
+  it('does not call expose when onSetup returns false (AC-3)', async () => {
+    const expose = vi.fn(() => 'should-not-store');
+    let seenDeps: Record<string, unknown> | undefined;
+    const features = [
+      defineLoadable({
+        id: 'producer',
+        selectors: [],
+        priority: 1,
+        global: true,
+        onSetup: () => false,
+        expose,
+      }),
+      defineLoadable({
+        id: 'consumer',
+        selectors: [],
+        priority: 2,
+        global: true,
+        dependencies: ['producer'],
+        onSetup: (_s, { deps }) => { seenDeps = deps; },
+      }),
+    ];
+
+    await loadFeatures(features);
+
+    expect(expose).not.toHaveBeenCalled();
+    expect(Object.keys(seenDeps!)).toContain('producer');
+    expect(seenDeps!.producer).toBeUndefined();
+  });
+
+  it('skips a dependent when its dependency fails (AC-4)', async () => {
+    const consumerSetup = vi.fn();
+    const features = [
+      defineLoadable({
+        id: 'producer',
+        selectors: [],
+        priority: 1,
+        global: true,
+        onSetup: () => { throw new Error('setup failed'); },
+      }),
+      defineLoadable({
+        id: 'consumer',
+        selectors: [],
+        priority: 2,
+        global: true,
+        dependencies: ['producer'],
+        onSetup: consumerSetup,
+      }),
+    ];
+
+    await loadFeatures(features);
+
+    expect(consumerSetup).not.toHaveBeenCalled();
+    expect(warnSpy).toHaveBeenCalledWith(
+      expect.stringContaining('dependency "producer" failed'),
+    );
+  });
+
+  it('prunes a circular dependency and still runs both features (AC-5)', async () => {
+    const order: string[] = [];
+    const features = [
+      defineLoadable({
+        id: 'a',
+        selectors: [],
+        priority: 1,
+        global: true,
+        dependencies: ['b'],
+        onSetup: () => { order.push('a'); },
+      }),
+      defineLoadable({
+        id: 'b',
+        selectors: [],
+        priority: 2,
+        global: true,
+        dependencies: ['a'],
+        onSetup: () => { order.push('b'); },
+      }),
+    ];
+
+    await loadFeatures(features);
+
+    expect(order).toContain('a');
+    expect(order).toContain('b');
+    expect(warnSpy).toHaveBeenCalledWith(
+      expect.stringContaining('Circular dependency'),
+    );
+  });
+
+  it('exposes only direct dependencies, not transitive ones (AC-6)', async () => {
+    let seenDepsB: Record<string, unknown> | undefined;
+    let seenDepsC: Record<string, unknown> | undefined;
+    const features = [
+      defineLoadable({
+        id: 'a',
+        selectors: [],
+        priority: 1,
+        global: true,
+        onSetup: () => 'value-a',
+        expose: (ctx) => ctx,
+      }),
+      defineLoadable({
+        id: 'b',
+        selectors: [],
+        priority: 2,
+        global: true,
+        dependencies: ['a'],
+        // Reads its own direct dep so the A→B leg is load-bearing (not a hardcoded return).
+        onSetup: (_s, { deps }) => { seenDepsB = deps; return 'value-b'; },
+        expose: (ctx) => ctx,
+      }),
+      defineLoadable({
+        id: 'c',
+        selectors: [],
+        priority: 3,
+        global: true,
+        dependencies: ['b'],
+        onSetup: (_s, { deps }) => { seenDepsC = deps; },
+      }),
+    ];
+
+    await loadFeatures(features);
+
+    // A→B: B's direct dep `a` carries A's exposed value (the chain actually delivers).
+    expect(Object.keys(seenDepsB!)).toEqual(['a']);
+    expect(seenDepsB!.a).toBe('value-a');
+    // B→C: C declares only `b` → its deps has `b` and NOT the transitive `a`.
+    expect(Object.keys(seenDepsC!)).toEqual(['b']);
+    expect(seenDepsC!.b).toBe('value-b');
+  });
+
+  it('treats a feature whose expose throws as failed and skips dependents (AC-7)', async () => {
+    const consumerSetup = vi.fn();
+    const features = [
+      defineLoadable({
+        id: 'producer',
+        selectors: [],
+        priority: 1,
+        global: true,
+        onSetup: () => ({}),
+        expose: () => { throw new Error('expose boom'); },
+      }),
+      defineLoadable({
+        id: 'consumer',
+        selectors: [],
+        priority: 2,
+        global: true,
+        dependencies: ['producer'],
+        onSetup: consumerSetup,
+      }),
+    ];
+
+    await loadFeatures(features);
+
+    expect(consumerSetup).not.toHaveBeenCalled();
+    expect(warnSpy).toHaveBeenCalledWith(
+      expect.stringContaining('dependency "producer" failed'),
+    );
+  });
+
+  it('delivers the exposed value when producer and consumer share a wave (AC-1, same-wave)', async () => {
+    // Both at priority 1 → same wave → gated, concurrent. This is the only #38 shape that
+    // exercises store-before-markReady through the real defineFeature seam (the cross-wave
+    // tests above satisfy ordering trivially because wave 1 fully settles before wave 2).
+    const value = { ready: true };
+    let seenValue: unknown = 'not-set';
+    const features = [
+      defineLoadable({
+        id: 'producer',
+        selectors: [],
+        priority: 1,
+        global: true,
+        onSetup: () => value,
+        expose: (ctx) => ctx,
+      }),
+      defineLoadable({
+        id: 'consumer',
+        selectors: [],
+        priority: 1,
+        global: true,
+        dependencies: ['producer'],
+        onSetup: (_s, { deps }) => { seenValue = deps['producer']; },
+      }),
+    ];
+
+    await loadFeatures(features);
+
+    expect(seenValue).toBe(value);
+  });
+
+  it('runs a plain feature (no expose/deps) through its full lifecycle unaffected (AC-8)', async () => {
+    document.body.innerHTML = '<div data-plain></div><div data-plain></div>';
+    const order: string[] = [];
+    const features = [
+      defineLoadable({
+        id: 'plain',
+        selectors: ['[data-plain]'],
+        priority: 1,
+        onSetup: () => { order.push('setup'); return { n: 1 }; },
+        onEach: ({ ctx }) => { order.push(`each:${(ctx as { n: number }).n}`); },
+        onReady: () => { order.push('ready'); },
+      }),
+    ];
+
+    await loadFeatures(features);
+
+    expect(order).toEqual(['setup', 'each:1', 'each:1', 'ready']);
   });
 });

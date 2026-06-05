@@ -2,6 +2,12 @@ import type { FeatureDescriptor, FeatureMeta, LoaderOptions } from './types.ts';
 
 const DEFAULT_TIMEOUT_MS = 10_000;
 
+// Returned by `initFeature` when the feature's `expose` did NOT run — either no `expose` is
+// declared, or the lifecycle short-circuited (disabled / aborted / `onSetup` returned `false`).
+// Lets `runWithDeps` distinguish "expose ran and returned undefined" from "expose never ran",
+// so `exposedValues` only ever holds entries for features whose `expose` actually executed.
+const EXPOSE_SKIPPED = Symbol('expose-skipped');
+
 type LogFn = (message: string, ...args: unknown[]) => void;
 
 interface LoadedFeature {
@@ -20,6 +26,10 @@ interface ExecutionContext {
   gate: DependencyGate;
   prunedEdges: Set<string>;
   failedIds: Set<string>;
+  // Accumulates the exposed value of each feature whose `expose` actually ran, keyed by feature id.
+  // Features without `expose`, or that short-circuited (disabled/aborted/`onSetup`→false), get no
+  // entry — so `exposedValues.has(id)` is a meaningful "did this feature expose?" check.
+  exposedValues: Map<string, unknown>;
   warn: LogFn;
 }
 
@@ -85,32 +95,44 @@ function withTimeout<T>(
 async function initFeature(
   feature: FeatureDescriptor,
   selectors: string[],
+  deps: Record<string, unknown>,
   signal?: AbortSignal,
-): Promise<void> {
-  if (feature.enabled === false) return;
-  if (signal?.aborted) return;
+): Promise<unknown> {
+  if (feature.enabled === false) return EXPOSE_SKIPPED;
+  if (signal?.aborted) return EXPOSE_SKIPPED;
 
   let ctx: unknown;
   if (feature.onSetup) {
-    ctx = await feature.onSetup(selectors);
-    if (ctx === false) return;
+    ctx = await feature.onSetup(selectors, { deps });
+    if (ctx === false) return EXPOSE_SKIPPED;
   }
 
-  if (signal?.aborted) return;
+  if (signal?.aborted) return EXPOSE_SKIPPED;
 
   if (feature.onEach && selectors.length) {
     const elements = document.querySelectorAll(selectors.join(', '));
     for (let j = 0; j < elements.length; j++) {
-      if (signal?.aborted) return;
+      if (signal?.aborted) return EXPOSE_SKIPPED;
       await feature.onEach({ el: elements[j]!, index: j, elements, ctx });
     }
   }
 
-  if (signal?.aborted) return;
+  if (signal?.aborted) return EXPOSE_SKIPPED;
 
   if (feature.onReady) {
     await feature.onReady();
   }
+
+  if (signal?.aborted) return EXPOSE_SKIPPED;
+
+  // Project the feature's public API after its full lifecycle. Awaited so an async
+  // `expose` resolves to a value (not a Promise) for dependents. `ctx` is `undefined`
+  // when `onSetup` is absent. Returns EXPOSE_SKIPPED when no `expose` is declared.
+  if (feature.expose) {
+    return await feature.expose(ctx);
+  }
+
+  return EXPOSE_SKIPPED;
 }
 
 interface TopoSortResult {
@@ -259,6 +281,8 @@ async function runWithDeps(
   ctx: ExecutionContext,
   signal?: AbortSignal,
 ): Promise<void> {
+  const deps: Record<string, unknown> = {};
+
   if (validDeps.length) {
     await Promise.all(validDeps.map(ctx.gate.waitForDependency));
 
@@ -270,9 +294,23 @@ async function runWithDeps(
       ctx.failedIds.add(meta.id);
       return;
     }
+
+    // Build the deps record from directly-declared (validated) dependencies' exposed values.
+    for (const depId of validDeps) {
+      deps[depId] = ctx.exposedValues.get(depId);
+    }
   }
 
-  await initFeature(descriptor, meta.selectors, signal);
+  const exposed = await initFeature(descriptor, meta.selectors, deps, signal);
+
+  // Store the exposed value before this feature's markReady fires (markReady runs in
+  // dispatchWaves's finally, after runWithDeps resolves). EXPOSE_SKIPPED means `expose` never
+  // ran (no expose, or short-circuited) → no entry. The `!signal?.aborted` guard blocks a
+  // timed-out feature's abandoned background run from writing a ghost value after markReady
+  // (when the timeout won the race, signal.aborted is true).
+  if (exposed !== EXPOSE_SKIPPED && !signal?.aborted) {
+    ctx.exposedValues.set(meta.id, exposed);
+  }
 }
 
 async function dispatchWaves(
@@ -375,7 +413,14 @@ export async function loadFeatures(
 
   const { loaded, failedIds } = await loadChunks(sortedFeatures, knownIds, prunedEdges, gate, warn);
 
-  const ctx: ExecutionContext = { knownIds, gate, prunedEdges, failedIds, warn };
+  const ctx: ExecutionContext = {
+    knownIds,
+    gate,
+    prunedEdges,
+    failedIds,
+    exposedValues: new Map(),
+    warn,
+  };
 
   const waves = groupIntoWaves(loaded, warn);
 
