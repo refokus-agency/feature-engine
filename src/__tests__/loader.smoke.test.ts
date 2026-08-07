@@ -121,7 +121,7 @@ describe('loadFeatures — smoke tests', () => {
 
     let slowStarted = false;
     let slowFinished = false;
-    const fastTimings: { id: string; slowState: string }[] = [];
+    const fastTimings: Array<{ id: string; slowState: string }> = [];
 
     const slowDescriptor = makeDescriptor({
       id: 'slow',
