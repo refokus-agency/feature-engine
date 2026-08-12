@@ -35,7 +35,11 @@
     "feature-loading",
     "code-splitting",
     "vite",
-    "typescript"
+    "typescript",
+    "lazy-loading",
+    "esm",
+    "browser",
+    "dependency-graph"
   ],
   "repository": {
     "type": "git",
