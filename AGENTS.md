@@ -10,20 +10,23 @@ Human-facing contribution instructions live in [CONTRIBUTING.md](CONTRIBUTING.md
 ## Commands
 
 ```bash
-npm test                  # Run all tests once (vitest run)
-npm run test:watch        # Watch mode
-npm run test:coverage     # With coverage
+npm test                  # Run all tests once WITH coverage (vitest run --coverage)
+npm run test:watch        # Watch mode (no coverage)
+npm run test:coverage     # Explicit alias for the same coverage run
 npx vitest run src/__tests__/loader.test.ts   # Run a single test file
 npx vitest run -t "name"  # Run tests matching a name
 
 npm run typecheck         # Type-check only (tsc --noEmit --strict)
-npm run lint              # ESLint with --fix (lint:report for no-fix)
+npm run lint              # Biome lint with --write (lint:report for no-fix)
+npm run format            # Biome formatter, writes to ./src
 npm run build             # Compile to dist/ (tsc)
 npm run build:clean       # rm -rf dist && build
 npm run bench             # Run benchmarks (src/**/*.bench.ts)
 ```
 
 Requires Node >= 24 (see `.nvmrc`). The package is ESM-only (`"type": "module"`).
+
+`npm test` carries `--coverage`, so the coverage thresholds in `vite.config.ts` are enforced on every test run, including in CI. They are **absolute uncovered counts, not percentages** (`statements: -11`, `branches: -8`, `lines: -11`, `functions: 100`), and there is currently no slack in any of them — adding an uncovered line or an untested function fails the run. See the Test Coverage section of [CONTRIBUTING.md](CONTRIBUTING.md) for the full rules.
 
 ## Architecture
 
