@@ -233,7 +233,7 @@ export default defineFeature({
 npm run build          # Compile TypeScript
 npm run build:clean    # Clean and rebuild
 npm test               # Run tests
-npm run check-types    # Type checking
+npm run typecheck      # Type checking
 npm run lint           # Lint and fix
 ```
 

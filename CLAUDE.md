@@ -15,7 +15,7 @@ npm run test:coverage     # With coverage
 npx vitest run src/__tests__/loader.test.ts   # Run a single test file
 npx vitest run -t "name"  # Run tests matching a name
 
-npm run check-types       # Type-check only (tsc --noEmit --strict)
+npm run typecheck         # Type-check only (tsc --noEmit --strict)
 npm run lint              # ESLint with --fix (lint:report for no-fix)
 npm run build             # Compile to dist/ (tsc)
 npm run build:clean       # rm -rf dist && build
