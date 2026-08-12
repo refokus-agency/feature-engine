@@ -1,6 +1,7 @@
-# CLAUDE.md
+# AGENTS.md — Coding Agent Guidelines
 
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+Guidelines for AI coding agents working in `@refokus-agency/feature-engine`.
+Human-facing contribution instructions live in [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## What this is
 
@@ -42,7 +43,9 @@ Three independent pieces, each maps to a phase of the system:
 
 ### Feature lifecycle
 
-`onSetup(selectors)` → `onEach({ el, index, elements, ctx })` per element → `onReady()`. `onSetup` returning `false` aborts the feature (skips `onEach`/`onReady`); any other return becomes `ctx`. Global features run `onSetup`/`onReady` only — `onEach` is rejected at `defineFeature` time. Execution respects `AbortSignal` (driven by `withTimeout`) and checks `signal.aborted` between every hook.
+`onSetup(selectors, { deps })` → `onEach({ el, index, elements, ctx })` per element → `onReady()` → `expose(ctx)`. `onSetup` returning `false` aborts the feature (skips `onEach`/`onReady`); any other return becomes `ctx`. Global features run `onSetup`/`onReady` only — `onEach` is rejected at `defineFeature` time. Execution respects `AbortSignal` (driven by `withTimeout`) and checks `signal.aborted` between every hook.
+
+Features share values through `expose`/`deps`: after a feature's lifecycle completes, its optional `expose(ctx)` projection runs and the return value is published under the feature's id. Every dependent then receives it via `onSetup`'s second argument — `deps` maps each id in `dependencies` to that feature's exposed value. This is what the `DependencyGate` is gating on, so a feature declaring a dependency can read its value without reaching for globals. A feature with no `expose` publishes nothing and its dependents see no entry for it.
 
 ## Conventions
 
