@@ -58,3 +58,6 @@ datasources/
 .npmrc
 
 .claude/worktrees
+
+.atl
+.cothinker

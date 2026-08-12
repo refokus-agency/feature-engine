@@ -53,4 +53,8 @@ Three independent pieces, each maps to a phase of the system:
 
 ## Releases
 
-Automated via semantic-release on push to `main` (`.releaserc.json`). Commits **must** follow Conventional Commits — use `npm run commit` (commitizen) for the wizard. Version bumps, CHANGELOG, and the GitHub Packages publish are all driven by commit messages; do not bump versions manually.
+Automated via semantic-release on push to `main` (`.releaserc.json`). Commits **must** follow Conventional Commits — use `npm run commit` (commitizen) for the wizard. The computed version and the GitHub Packages publish are both driven by commit messages; do not bump versions manually.
+
+`package.json` stays pinned at `version: "0.0.0-development"` in git — nothing commits the bump back (there is no `@semantic-release/git` plugin). `@semantic-release/npm` rewrites the version in the workspace at publish time only, so the tarball carries the computed version while the committed manifest never changes. Release notes live only in GitHub Releases; there is no `CHANGELOG.md` in this repo.
+
+`LICENSE` and `NOTICE` are required distribution artifacts under Apache-2.0 and are listed in `package.json` `files`. `src/__tests__/packaging.test.ts` guards them — it asserts each is declared, present on disk, and **tracked by git**, because `npm pack` omits a missing listed file silently and `npm pack --dry-run` reads the working tree rather than the index.

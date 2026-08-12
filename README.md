@@ -1,5 +1,7 @@
 # @refokus-agency/feature-engine
 
+[![License: Apache-2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE)
+
 Declarative feature loading system with code splitting for Webflow projects. Define features as isolated modules, let the engine handle DOM matching, dependency resolution, and lifecycle execution.
 
 ## Installation
@@ -247,4 +249,4 @@ Published to GitHub Packages on push to `main`.
 
 ## License
 
-See [LICENSE](LICENSE) file.
+Licensed under the [Apache License 2.0](LICENSE). See also [NOTICE](NOTICE).
