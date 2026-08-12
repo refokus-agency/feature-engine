@@ -342,9 +342,9 @@ describe('defineFeature', () => {
 
   // Compile-time assertions for the `expose` field and `OnSetupContext` second
   // argument (epic #34, issue #35). These tests must COMPILE under `tsc --strict`;
-  // the runtime assertions are secondary. `npm run check-types` type-checks this
+  // the runtime assertions are secondary. `npm run typecheck` type-checks this
   // file via `tsconfig.eslint.json` (which includes `src/__tests__/**`), so if any
-  // shape below stops type-checking, check-types fails — that is the authoritative gate.
+  // shape below stops type-checking, typecheck fails — that is the authoritative gate.
   describe('expose + OnSetupContext types', () => {
     it('forwards expose into the frozen descriptor (AC-1, #36 AC-8)', () => {
       const expose = (ctx: unknown) => ({ value: ctx });

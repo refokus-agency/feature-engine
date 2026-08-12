@@ -235,7 +235,7 @@ export default defineFeature({
 npm run build          # Compile TypeScript
 npm run build:clean    # Clean and rebuild
 npm test               # Run tests
-npm run check-types    # Type checking
+npm run typecheck      # Type checking
 npm run lint           # Lint and fix
 ```
 
@@ -248,6 +248,12 @@ npm run commit         # Commitizen wizard
 ```
 
 Published to GitHub Packages on push to `main`.
+
+## Contributing
+
+Contributions are welcome. [CONTRIBUTING.md](CONTRIBUTING.md) covers the development setup, the verification chain to run before opening a pull request, and the commit conventions that drive releases.
+
+Participation is governed by our [Code of Conduct](CODE_OF_CONDUCT.md). To report a security vulnerability, follow [SECURITY.md](SECURITY.md) — never open a public issue for one.
 
 ## License
 
