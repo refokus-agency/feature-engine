@@ -69,9 +69,7 @@ describe('defineFeature', () => {
     });
 
     it('accepts empty selectors array for global features', () => {
-      const result = defineFeature(
-        minimal({ selectors: [], global: true }),
-      );
+      const result = defineFeature(minimal({ selectors: [], global: true }));
       expect([...result.selectors]).toEqual([]);
       expect(result.global).toBe(true);
     });
@@ -79,9 +77,9 @@ describe('defineFeature', () => {
 
   describe('validation errors', () => {
     it('throws when id is empty string', () => {
-      expect(() =>
-        defineFeature(minimal({ id: '' })),
-      ).toThrow('[defineFeature] id is required and must be a string');
+      expect(() => defineFeature(minimal({ id: '' }))).toThrow(
+        '[defineFeature] id is required and must be a string',
+      );
     });
 
     it('throws when id is not a string', () => {
@@ -106,51 +104,39 @@ describe('defineFeature', () => {
 
     it('throws when selectors contains non-strings', () => {
       expect(() =>
-        defineFeature(
-          minimal({ selectors: [1, 2] as unknown as string[] }),
-        ),
+        defineFeature(minimal({ selectors: [1, 2] as unknown as string[] })),
       ).toThrow('[defineFeature] selectors must be an array of strings');
     });
 
     it('throws when selectors is null', () => {
       expect(() =>
-        defineFeature(
-          minimal({ selectors: null as unknown as string[] }),
-        ),
+        defineFeature(minimal({ selectors: null as unknown as string[] })),
       ).toThrow('[defineFeature] selectors must be an array of strings');
     });
 
     it('throws when priority is not a number', () => {
       expect(() =>
-        defineFeature(
-          minimal({ priority: '10' as unknown as number }),
-        ),
+        defineFeature(minimal({ priority: '10' as unknown as number })),
       ).toThrow(
         '[defineFeature] priority is required and must be a finite number',
       );
     });
 
     it('throws when priority is NaN', () => {
-      expect(() =>
-        defineFeature(minimal({ priority: NaN })),
-      ).toThrow(
+      expect(() => defineFeature(minimal({ priority: NaN }))).toThrow(
         '[defineFeature] priority is required and must be a finite number',
       );
     });
 
     it('throws when priority is Infinity', () => {
-      expect(() =>
-        defineFeature(minimal({ priority: Infinity })),
-      ).toThrow(
+      expect(() => defineFeature(minimal({ priority: Infinity }))).toThrow(
         '[defineFeature] priority is required and must be a finite number',
       );
     });
 
     it('throws when neither onSetup nor onEach are functions', () => {
       expect(() =>
-        defineFeature(
-          minimal({ onSetup: undefined, onEach: undefined }),
-        ),
+        defineFeature(minimal({ onSetup: undefined, onEach: undefined })),
       ).toThrow(
         '[defineFeature] at least one of onSetup or onEach is required',
       );
@@ -195,7 +181,8 @@ describe('defineFeature', () => {
       expect(() =>
         defineFeature(
           minimal({
-            expose: 'not a function' as unknown as FeatureDescriptorInput['expose'],
+            expose:
+              'not a function' as unknown as FeatureDescriptorInput['expose'],
           }),
         ),
       ).toThrow('[defineFeature] expose must be a function');
@@ -203,17 +190,13 @@ describe('defineFeature', () => {
 
     it('throws when dependencies is not an array of strings', () => {
       expect(() =>
-        defineFeature(
-          minimal({ dependencies: [1, 2] as unknown as string[] }),
-        ),
+        defineFeature(minimal({ dependencies: [1, 2] as unknown as string[] })),
       ).toThrow('[defineFeature] dependencies must be an array of strings');
     });
 
     it('throws when enabled is not a boolean', () => {
       expect(() =>
-        defineFeature(
-          minimal({ enabled: 1 as unknown as boolean }),
-        ),
+        defineFeature(minimal({ enabled: 1 as unknown as boolean })),
       ).toThrow('[defineFeature] enabled must be a boolean');
     });
 
@@ -231,9 +214,7 @@ describe('defineFeature', () => {
 
     it('throws when timeout is not a number', () => {
       expect(() =>
-        defineFeature(
-          minimal({ timeout: '5000' as unknown as number }),
-        ),
+        defineFeature(minimal({ timeout: '5000' as unknown as number })),
       ).toThrow('[defineFeature] timeout must be a positive number (ms)');
     });
 

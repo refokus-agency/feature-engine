@@ -48,7 +48,10 @@ export function defineFeature(
     throw new Error('[defineFeature] selectors must be an array of strings');
   }
 
-  if (typeof descriptor.priority !== 'number' || !Number.isFinite(descriptor.priority)) {
+  if (
+    typeof descriptor.priority !== 'number' ||
+    !Number.isFinite(descriptor.priority)
+  ) {
     throw new Error(
       '[defineFeature] priority is required and must be a finite number',
     );
@@ -90,9 +93,7 @@ export function defineFeature(
     (!Array.isArray(descriptor.dependencies) ||
       !descriptor.dependencies.every((d) => typeof d === 'string'))
   ) {
-    throw new Error(
-      '[defineFeature] dependencies must be an array of strings',
-    );
+    throw new Error('[defineFeature] dependencies must be an array of strings');
   }
 
   if (

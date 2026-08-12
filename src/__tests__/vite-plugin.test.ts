@@ -435,7 +435,9 @@ describe('featureMetadataPlugin', () => {
   });
 
   it('accepts include option without error', () => {
-    const plugin = featureMetadataPlugin({ include: 'widgets/**/*.feature.js' });
+    const plugin = featureMetadataPlugin({
+      include: 'widgets/**/*.feature.js',
+    });
     expect(plugin.name).toBe('feature-metadata');
   });
 
@@ -449,8 +451,14 @@ describe('featureMetadataPlugin', () => {
 
   it('returns undefined from load for non-virtual module ids', () => {
     const plugin = featureMetadataPlugin();
-    (plugin.configResolved as (...args: any[]) => any).call({}, { root: TMP_ROOT });
-    const result = (plugin.load as (...args: any[]) => any).call({}, 'some-regular-module');
+    (plugin.configResolved as (...args: any[]) => any).call(
+      {},
+      { root: TMP_ROOT },
+    );
+    const result = (plugin.load as (...args: any[]) => any).call(
+      {},
+      'some-regular-module',
+    );
     expect(result).toBeUndefined();
   });
 
@@ -466,13 +474,20 @@ describe('featureMetadataPlugin', () => {
         },
       };
 
-      const result = handleHotUpdate.call({}, {
-        file: '/src/features/hero.feature.js',
-        server: mockServer,
-      });
+      const result = handleHotUpdate.call(
+        {},
+        {
+          file: '/src/features/hero.feature.js',
+          server: mockServer,
+        },
+      );
 
-      expect(mockServer.moduleGraph.getModuleById).toHaveBeenCalledWith('\0virtual:feature-metadata');
-      expect(mockServer.moduleGraph.invalidateModule).toHaveBeenCalledWith(mockMod);
+      expect(mockServer.moduleGraph.getModuleById).toHaveBeenCalledWith(
+        '\0virtual:feature-metadata',
+      );
+      expect(mockServer.moduleGraph.invalidateModule).toHaveBeenCalledWith(
+        mockMod,
+      );
       expect(result).toEqual([mockMod]);
     });
 
@@ -486,10 +501,13 @@ describe('featureMetadataPlugin', () => {
         },
       };
 
-      const result = handleHotUpdate.call({}, {
-        file: '/src/components/Button.tsx',
-        server: mockServer,
-      });
+      const result = handleHotUpdate.call(
+        {},
+        {
+          file: '/src/components/Button.tsx',
+          server: mockServer,
+        },
+      );
 
       expect(result).toBeUndefined();
       expect(mockServer.moduleGraph.getModuleById).not.toHaveBeenCalled();
@@ -505,10 +523,13 @@ describe('featureMetadataPlugin', () => {
         },
       };
 
-      const result = handleHotUpdate.call({}, {
-        file: '/src/features/hero.feature.js',
-        server: mockServer,
-      });
+      const result = handleHotUpdate.call(
+        {},
+        {
+          file: '/src/features/hero.feature.js',
+          server: mockServer,
+        },
+      );
 
       expect(result).toBeUndefined();
       expect(mockServer.moduleGraph.invalidateModule).not.toHaveBeenCalled();
@@ -527,7 +548,9 @@ describe('featureMetadataPlugin', () => {
     }
 
     afterAll(() => {
-      try { rmSync(TMP_ROOT, { recursive: true, force: true }); } catch {}
+      try {
+        rmSync(TMP_ROOT, { recursive: true, force: true });
+      } catch {}
     });
 
     it('generates empty array when no feature files exist', () => {
@@ -537,21 +560,31 @@ describe('featureMetadataPlugin', () => {
       const plugin = featureMetadataPlugin();
       (plugin.configResolved as (...args: any[]) => any).call({}, { root });
 
-      const result = (plugin.load as (...args: any[]) => any).call({}, '\0virtual:feature-metadata');
+      const result = (plugin.load as (...args: any[]) => any).call(
+        {},
+        '\0virtual:feature-metadata',
+      );
       expect(result).toBe('export default [\n\n];\n');
     });
 
     it('skips duplicate feature IDs', () => {
       const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
       const root = setupFixture('dupe', {
-        'a.feature.js': featureSource(`id: "dupe", selectors: ["[data-a]"], priority: 1, onSetup() {}`),
-        'b.feature.js': featureSource(`id: "dupe", selectors: ["[data-b]"], priority: 2, onSetup() {}`),
+        'a.feature.js': featureSource(
+          `id: "dupe", selectors: ["[data-a]"], priority: 1, onSetup() {}`,
+        ),
+        'b.feature.js': featureSource(
+          `id: "dupe", selectors: ["[data-b]"], priority: 2, onSetup() {}`,
+        ),
       });
 
       const plugin = featureMetadataPlugin();
       (plugin.configResolved as (...args: any[]) => any).call({}, { root });
 
-      const result = (plugin.load as (...args: any[]) => any).call({}, '\0virtual:feature-metadata') as string;
+      const result = (plugin.load as (...args: any[]) => any).call(
+        {},
+        '\0virtual:feature-metadata',
+      ) as string;
       const importCount = (result.match(/import\(/g) || []).length;
       expect(importCount).toBe(1);
       expect(warnSpy).toHaveBeenCalledWith(
@@ -561,14 +594,21 @@ describe('featureMetadataPlugin', () => {
 
     it('excludes enabled: false features from output', () => {
       const root = setupFixture('enabled', {
-        'active.feature.js': featureSource(`id: "active", selectors: ["[data-a]"], priority: 1, onSetup() {}`),
-        'inactive.feature.js': featureSource(`id: "inactive", selectors: ["[data-b]"], priority: 2, enabled: false, onSetup() {}`),
+        'active.feature.js': featureSource(
+          `id: "active", selectors: ["[data-a]"], priority: 1, onSetup() {}`,
+        ),
+        'inactive.feature.js': featureSource(
+          `id: "inactive", selectors: ["[data-b]"], priority: 2, enabled: false, onSetup() {}`,
+        ),
       });
 
       const plugin = featureMetadataPlugin();
       (plugin.configResolved as (...args: any[]) => any).call({}, { root });
 
-      const result = (plugin.load as (...args: any[]) => any).call({}, '\0virtual:feature-metadata') as string;
+      const result = (plugin.load as (...args: any[]) => any).call(
+        {},
+        '\0virtual:feature-metadata',
+      ) as string;
       expect(result).toContain('"active"');
       expect(result).not.toContain('"inactive"');
     });
@@ -589,7 +629,10 @@ describe('featureMetadataPlugin', () => {
       const plugin = featureMetadataPlugin();
       (plugin.configResolved as (...args: any[]) => any).call({}, { root });
 
-      const result = (plugin.load as (...args: any[]) => any).call({}, '\0virtual:feature-metadata') as string;
+      const result = (plugin.load as (...args: any[]) => any).call(
+        {},
+        '\0virtual:feature-metadata',
+      ) as string;
 
       expect(result).toContain('id: "my-feature"');
       expect(result).toContain('selectors: ["[data-my]"]');
@@ -605,51 +648,66 @@ describe('featureMetadataPlugin', () => {
       const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
       const root = setupFixture('parse-error', {
         'bad.feature.js': 'export default {{{',
-        'good.feature.js': featureSource(`id: "good", selectors: ["[data-x]"], priority: 1, onSetup() {}`),
+        'good.feature.js': featureSource(
+          `id: "good", selectors: ["[data-x]"], priority: 1, onSetup() {}`,
+        ),
       });
 
       const plugin = featureMetadataPlugin();
       (plugin.configResolved as (...args: any[]) => any).call({}, { root });
 
-      const result = (plugin.load as (...args: any[]) => any).call({}, '\0virtual:feature-metadata') as string;
+      const result = (plugin.load as (...args: any[]) => any).call(
+        {},
+        '\0virtual:feature-metadata',
+      ) as string;
       expect(result).toContain('"good"');
       expect(warnSpy).toHaveBeenCalledWith(
         expect.stringContaining('Failed to parse'),
       );
     });
 
-    it.skipIf(process.getuid?.() === 0)('warns and skips files that cannot be read', () => {
-      const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
-      const root = resolve(TMP_ROOT, 'read-fail');
-      const featuresDir = resolve(root, 'src', 'features');
-      mkdirSync(featuresDir, { recursive: true });
-      writeFileSync(
-        resolve(featuresDir, 'good.feature.js'),
-        featureSource(`id: "good", selectors: ["[data-x]"], priority: 1, onSetup() {}`),
-        'utf-8',
-      );
-      const unreadable = resolve(featuresDir, 'unreadable.feature.js');
-      writeFileSync(
-        unreadable,
-        featureSource(`id: "bad", selectors: ["[data-y]"], priority: 2, onSetup() {}`),
-        'utf-8',
-      );
-      chmodSync(unreadable, 0o000);
-
-      try {
-        const plugin = featureMetadataPlugin();
-        (plugin.configResolved as (...args: any[]) => any).call({}, { root });
-        const result = (plugin.load as (...args: any[]) => any).call({}, '\0virtual:feature-metadata') as string;
-
-        expect(result).toContain('"good"');
-        expect(result).not.toContain('"bad"');
-        expect(warnSpy).toHaveBeenCalledWith(
-          expect.stringContaining('Could not read'),
+    it.skipIf(process.getuid?.() === 0)(
+      'warns and skips files that cannot be read',
+      () => {
+        const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+        const root = resolve(TMP_ROOT, 'read-fail');
+        const featuresDir = resolve(root, 'src', 'features');
+        mkdirSync(featuresDir, { recursive: true });
+        writeFileSync(
+          resolve(featuresDir, 'good.feature.js'),
+          featureSource(
+            `id: "good", selectors: ["[data-x]"], priority: 1, onSetup() {}`,
+          ),
+          'utf-8',
         );
-      } finally {
-        chmodSync(unreadable, 0o644);
-      }
-    });
+        const unreadable = resolve(featuresDir, 'unreadable.feature.js');
+        writeFileSync(
+          unreadable,
+          featureSource(
+            `id: "bad", selectors: ["[data-y]"], priority: 2, onSetup() {}`,
+          ),
+          'utf-8',
+        );
+        chmodSync(unreadable, 0o000);
+
+        try {
+          const plugin = featureMetadataPlugin();
+          (plugin.configResolved as (...args: any[]) => any).call({}, { root });
+          const result = (plugin.load as (...args: any[]) => any).call(
+            {},
+            '\0virtual:feature-metadata',
+          ) as string;
+
+          expect(result).toContain('"good"');
+          expect(result).not.toContain('"bad"');
+          expect(warnSpy).toHaveBeenCalledWith(
+            expect.stringContaining('Could not read'),
+          );
+        } finally {
+          chmodSync(unreadable, 0o644);
+        }
+      },
+    );
 
     it('serializes timeout:null and empty dependencies in virtual module', () => {
       const root = setupFixture('null-fields', {
@@ -663,7 +721,10 @@ describe('featureMetadataPlugin', () => {
 
       const plugin = featureMetadataPlugin();
       (plugin.configResolved as (...args: any[]) => any).call({}, { root });
-      const result = (plugin.load as (...args: any[]) => any).call({}, '\0virtual:feature-metadata') as string;
+      const result = (plugin.load as (...args: any[]) => any).call(
+        {},
+        '\0virtual:feature-metadata',
+      ) as string;
 
       expect(result).toContain('timeout: null');
       expect(result).toContain('dependencies: []');

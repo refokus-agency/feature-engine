@@ -28,8 +28,8 @@ node_modules/
 # Optional npm cache directory
 .npm
 
-# Optional eslint cache
-.eslintcache
+# Test coverage output
+coverage/
 
 
 # dotenv environment variable files

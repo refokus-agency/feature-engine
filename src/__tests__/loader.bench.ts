@@ -113,7 +113,10 @@ describe('loadFeatures — parallel vs sequential', () => {
   bench(
     'parallel: 10 features x 20ms, 1 wave',
     async () => {
-      await loadFeatures(buildFeatures({ count: 10, waves: 1, delayMs: 20 }), opts);
+      await loadFeatures(
+        buildFeatures({ count: 10, waves: 1, delayMs: 20 }),
+        opts,
+      );
     },
     { iterations: 5, warmupIterations: 1 },
   );
@@ -121,7 +124,10 @@ describe('loadFeatures — parallel vs sequential', () => {
   bench(
     'sequential: 10 features x 20ms, 10 waves',
     async () => {
-      await loadFeatures(buildSequentialFeatures({ count: 10, delayMs: 20 }), opts);
+      await loadFeatures(
+        buildSequentialFeatures({ count: 10, delayMs: 20 }),
+        opts,
+      );
     },
     { iterations: 5, warmupIterations: 1 },
   );
@@ -129,7 +135,10 @@ describe('loadFeatures — parallel vs sequential', () => {
   bench(
     'parallel: 50 features x 10ms, 5 waves',
     async () => {
-      await loadFeatures(buildFeatures({ count: 50, waves: 5, delayMs: 10 }), opts);
+      await loadFeatures(
+        buildFeatures({ count: 50, waves: 5, delayMs: 10 }),
+        opts,
+      );
     },
     { iterations: 5, warmupIterations: 1 },
   );
@@ -137,7 +146,10 @@ describe('loadFeatures — parallel vs sequential', () => {
   bench(
     'parallel with deps: 10/wave x 3 waves x 15ms',
     async () => {
-      await loadFeatures(buildWithDeps({ perWave: 10, waves: 3, delayMs: 15 }), opts);
+      await loadFeatures(
+        buildWithDeps({ perWave: 10, waves: 3, delayMs: 15 }),
+        opts,
+      );
     },
     { iterations: 5, warmupIterations: 1 },
   );

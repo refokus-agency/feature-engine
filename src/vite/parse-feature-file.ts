@@ -56,7 +56,11 @@ function extractLiteralValue(
     const arr = node as ArrayExpression;
     const values: Array<string | number | boolean> = [];
     for (const el of arr.elements) {
-      if (!el || el.type !== 'Literal' || typeof (el as Literal).value !== 'string')
+      if (
+        !el ||
+        el.type !== 'Literal' ||
+        typeof (el as Literal).value !== 'string'
+      )
         return undefined;
       values.push((el as Literal).value as string);
     }

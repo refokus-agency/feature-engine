@@ -118,9 +118,15 @@ describe('loadFeatures', () => {
         makeLoadable(
           'lifecycle',
           {
-            onSetup: () => { order.push('setup'); },
-            onEach: () => { order.push('each'); },
-            onReady: () => { order.push('ready'); },
+            onSetup: () => {
+              order.push('setup');
+            },
+            onEach: () => {
+              order.push('each');
+            },
+            onReady: () => {
+              order.push('ready');
+            },
             selectors: ['[data-item]'],
           },
           { global: false, priority: 1 },
@@ -140,7 +146,9 @@ describe('loadFeatures', () => {
           'ctx-pass',
           {
             onSetup: () => ({ magic: 42 }),
-            onEach: ({ ctx }) => { receivedCtx = ctx; },
+            onEach: ({ ctx }) => {
+              receivedCtx = ctx;
+            },
             selectors: ['[data-x]'],
           },
           { priority: 1 },
@@ -154,13 +162,23 @@ describe('loadFeatures', () => {
 
     it('passes correct { el, index, elements, ctx } shape to onEach', async () => {
       document.body.innerHTML = '<div data-el></div><span data-el></span>';
-      const calls: Array<{ el: Element; index: number; elements: NodeListOf<Element>; ctx: unknown }> = [];
+      const calls: Array<{
+        el: Element;
+        index: number;
+        elements: NodeListOf<Element>;
+        ctx: unknown;
+      }> = [];
       const features = [
         makeLoadable(
           'shape-check',
           {
             onSetup: () => ({ token: 'abc' }),
-            onEach: (arg: { el: Element; index: number; elements: NodeListOf<Element>; ctx: unknown }) => {
+            onEach: (arg: {
+              el: Element;
+              index: number;
+              elements: NodeListOf<Element>;
+              ctx: unknown;
+            }) => {
               calls.push(arg);
             },
             selectors: ['[data-el]'],
@@ -208,8 +226,24 @@ describe('loadFeatures', () => {
     it('sorts features by priority', async () => {
       const order: string[] = [];
       const features = [
-        makeLoadable('b', { onSetup: () => { order.push('b'); } }, { global: true, priority: 20 }),
-        makeLoadable('a', { onSetup: () => { order.push('a'); } }, { global: true, priority: 10 }),
+        makeLoadable(
+          'b',
+          {
+            onSetup: () => {
+              order.push('b');
+            },
+          },
+          { global: true, priority: 20 },
+        ),
+        makeLoadable(
+          'a',
+          {
+            onSetup: () => {
+              order.push('a');
+            },
+          },
+          { global: true, priority: 10 },
+        ),
       ];
 
       await loadFeatures(features);
@@ -227,8 +261,24 @@ describe('loadFeatures', () => {
     it('initializes dependencies before dependents', async () => {
       const order: string[] = [];
       const features = [
-        makeLoadable('child', { onSetup: () => { order.push('child'); } }, { global: true, priority: 1, dependencies: ['parent'] }),
-        makeLoadable('parent', { onSetup: () => { order.push('parent'); } }, { global: true, priority: 2 }),
+        makeLoadable(
+          'child',
+          {
+            onSetup: () => {
+              order.push('child');
+            },
+          },
+          { global: true, priority: 1, dependencies: ['parent'] },
+        ),
+        makeLoadable(
+          'parent',
+          {
+            onSetup: () => {
+              order.push('parent');
+            },
+          },
+          { global: true, priority: 2 },
+        ),
       ];
 
       await loadFeatures(features);
@@ -240,8 +290,16 @@ describe('loadFeatures', () => {
       const aSetup = vi.fn();
       const bSetup = vi.fn();
       const features = [
-        makeLoadable('a', { onSetup: aSetup }, { global: true, priority: 1, dependencies: ['b'], timeout: 100 }),
-        makeLoadable('b', { onSetup: bSetup }, { global: true, priority: 2, dependencies: ['a'], timeout: 100 }),
+        makeLoadable(
+          'a',
+          { onSetup: aSetup },
+          { global: true, priority: 1, dependencies: ['b'], timeout: 100 },
+        ),
+        makeLoadable(
+          'b',
+          { onSetup: bSetup },
+          { global: true, priority: 2, dependencies: ['a'], timeout: 100 },
+        ),
       ];
 
       await loadFeatures(features, { timeout: 100 });
@@ -256,9 +314,33 @@ describe('loadFeatures', () => {
     it('resolves a deep 3-level dependency chain in correct order', async () => {
       const order: string[] = [];
       const features = [
-        makeLoadable('c', { onSetup: () => { order.push('c'); } }, { global: true, priority: 1, dependencies: ['b'] }),
-        makeLoadable('b', { onSetup: () => { order.push('b'); } }, { global: true, priority: 2, dependencies: ['a'] }),
-        makeLoadable('a', { onSetup: () => { order.push('a'); } }, { global: true, priority: 3 }),
+        makeLoadable(
+          'c',
+          {
+            onSetup: () => {
+              order.push('c');
+            },
+          },
+          { global: true, priority: 1, dependencies: ['b'] },
+        ),
+        makeLoadable(
+          'b',
+          {
+            onSetup: () => {
+              order.push('b');
+            },
+          },
+          { global: true, priority: 2, dependencies: ['a'] },
+        ),
+        makeLoadable(
+          'a',
+          {
+            onSetup: () => {
+              order.push('a');
+            },
+          },
+          { global: true, priority: 3 },
+        ),
       ];
 
       await loadFeatures(features);
@@ -269,7 +351,11 @@ describe('loadFeatures', () => {
     it('warns on unknown dependency and ignores it', async () => {
       const onSetup = vi.fn();
       const features = [
-        makeLoadable('feat', { onSetup }, { global: true, priority: 1, dependencies: ['nonexistent'] }),
+        makeLoadable(
+          'feat',
+          { onSetup },
+          { global: true, priority: 1, dependencies: ['nonexistent'] },
+        ),
       ];
 
       await loadFeatures(features);
@@ -300,7 +386,9 @@ describe('loadFeatures', () => {
 
       expect(warnSpy).toHaveBeenCalledWith(
         expect.stringContaining('Feature "slow" failed:'),
-        expect.objectContaining({ message: expect.stringContaining('timed out') }),
+        expect.objectContaining({
+          message: expect.stringContaining('timed out'),
+        }),
       );
     });
 
@@ -312,14 +400,20 @@ describe('loadFeatures', () => {
           { onSetup: () => new Promise(() => {}) },
           { global: true, priority: 1, timeout: 50 },
         ),
-        makeLoadable('fast', { onSetup: nextSetup }, { global: true, priority: 2 }),
+        makeLoadable(
+          'fast',
+          { onSetup: nextSetup },
+          { global: true, priority: 2 },
+        ),
       ];
 
       await loadFeatures(features);
 
       expect(warnSpy).toHaveBeenCalledWith(
         expect.stringContaining('Feature "slow" failed:'),
-        expect.objectContaining({ message: expect.stringContaining('timed out') }),
+        expect.objectContaining({
+          message: expect.stringContaining('timed out'),
+        }),
       );
       expect(nextSetup).toHaveBeenCalledOnce();
     });
@@ -337,7 +431,9 @@ describe('loadFeatures', () => {
 
       expect(warnSpy).toHaveBeenCalledWith(
         expect.stringContaining('Feature "slow" failed:'),
-        expect.objectContaining({ message: expect.stringContaining('timed out') }),
+        expect.objectContaining({
+          message: expect.stringContaining('timed out'),
+        }),
       );
     });
 
@@ -346,7 +442,15 @@ describe('loadFeatures', () => {
       const features = [
         makeLoadable(
           'async-no-timeout',
-          { onSetup: () => new Promise((r) => setTimeout(() => { resolved = true; r(undefined); }, 60)) },
+          {
+            onSetup: () =>
+              new Promise((r) =>
+                setTimeout(() => {
+                  resolved = true;
+                  r(undefined);
+                }, 60),
+              ),
+          },
           { global: true, priority: 1, timeout: 0 },
         ),
       ];
@@ -361,7 +465,9 @@ describe('loadFeatures', () => {
     });
 
     it('per-feature timeout overrides global timeout', async () => {
-      const onSetup = vi.fn(() => new Promise((resolve) => setTimeout(resolve, 120)));
+      const onSetup = vi.fn(
+        () => new Promise((resolve) => setTimeout(resolve, 120)),
+      );
       const features = [
         makeLoadable(
           'slow-ok',
@@ -430,7 +536,11 @@ describe('loadFeatures', () => {
           priority: 1,
           load: () => Promise.reject(new Error('network error')),
         }),
-        makeLoadable('dependent', { onSetup }, { global: true, priority: 2, dependencies: ['broken'] }),
+        makeLoadable(
+          'dependent',
+          { onSetup },
+          { global: true, priority: 2, dependencies: ['broken'] },
+        ),
       ];
 
       await loadFeatures(features);
@@ -455,8 +565,16 @@ describe('loadFeatures', () => {
           priority: 1,
           load: () => Promise.reject(new Error('network error')),
         }),
-        makeLoadable('b', { onSetup: bSetup }, { global: true, priority: 2, dependencies: ['a'] }),
-        makeLoadable('c', { onSetup: cSetup }, { global: true, priority: 3, dependencies: ['b'] }),
+        makeLoadable(
+          'b',
+          { onSetup: bSetup },
+          { global: true, priority: 2, dependencies: ['a'] },
+        ),
+        makeLoadable(
+          'c',
+          { onSetup: cSetup },
+          { global: true, priority: 3, dependencies: ['b'] },
+        ),
       ];
 
       await loadFeatures(features);
@@ -475,8 +593,16 @@ describe('loadFeatures', () => {
           priority: 1,
           load: () => Promise.reject(new Error('network error')),
         }),
-        makeLoadable('dependent', { onSetup: depSetup }, { global: true, priority: 2, dependencies: ['broken'] }),
-        makeLoadable('independent', { onSetup: indepSetup }, { global: true, priority: 2 }),
+        makeLoadable(
+          'dependent',
+          { onSetup: depSetup },
+          { global: true, priority: 2, dependencies: ['broken'] },
+        ),
+        makeLoadable(
+          'independent',
+          { onSetup: indepSetup },
+          { global: true, priority: 2 },
+        ),
       ];
 
       await loadFeatures(features);
@@ -488,8 +614,20 @@ describe('loadFeatures', () => {
     it('cascades failure when onSetup throws at runtime', async () => {
       const bSetup = vi.fn();
       const features = [
-        makeLoadable('a', { onSetup: () => { throw new Error('runtime'); } }, { global: true, priority: 1 }),
-        makeLoadable('b', { onSetup: bSetup }, { global: true, priority: 2, dependencies: ['a'] }),
+        makeLoadable(
+          'a',
+          {
+            onSetup: () => {
+              throw new Error('runtime');
+            },
+          },
+          { global: true, priority: 1 },
+        ),
+        makeLoadable(
+          'b',
+          { onSetup: bSetup },
+          { global: true, priority: 2, dependencies: ['a'] },
+        ),
       ];
 
       await loadFeatures(features);
@@ -501,9 +639,25 @@ describe('loadFeatures', () => {
       const bSetup = vi.fn();
       const cSetup = vi.fn();
       const features = [
-        makeLoadable('a', { onSetup: () => { throw new Error('runtime'); } }, { global: true, priority: 1 }),
-        makeLoadable('b', { onSetup: bSetup }, { global: true, priority: 2, dependencies: ['a'] }),
-        makeLoadable('c', { onSetup: cSetup }, { global: true, priority: 3, dependencies: ['b'] }),
+        makeLoadable(
+          'a',
+          {
+            onSetup: () => {
+              throw new Error('runtime');
+            },
+          },
+          { global: true, priority: 1 },
+        ),
+        makeLoadable(
+          'b',
+          { onSetup: bSetup },
+          { global: true, priority: 2, dependencies: ['a'] },
+        ),
+        makeLoadable(
+          'c',
+          { onSetup: cSetup },
+          { global: true, priority: 3, dependencies: ['b'] },
+        ),
       ];
 
       await loadFeatures(features);
@@ -522,7 +676,11 @@ describe('loadFeatures', () => {
           priority: 1,
           load: () => Promise.reject(new Error('network error')),
         }),
-        makeLoadable('dependent', { onSetup }, { global: true, priority: 2, dependencies: ['ok', 'broken'] }),
+        makeLoadable(
+          'dependent',
+          { onSetup },
+          { global: true, priority: 2, dependencies: ['ok', 'broken'] },
+        ),
       ];
 
       await loadFeatures(features);
@@ -609,10 +767,18 @@ describe('loadFeatures', () => {
 
     it('pre-seeds unmatched features as ready to prevent deadlock', async () => {
       const order: string[] = [];
-      const unmatched = makeMeta({ id: 'unmatched', selectors: ['[data-gone]'], priority: 1 });
+      const unmatched = makeMeta({
+        id: 'unmatched',
+        selectors: ['[data-gone]'],
+        priority: 1,
+      });
       const dependent = makeLoadable(
         'dependent',
-        { onSetup: () => { order.push('dependent'); } },
+        {
+          onSetup: () => {
+            order.push('dependent');
+          },
+        },
         { global: true, priority: 2, dependencies: ['unmatched'] },
       );
 
@@ -629,7 +795,9 @@ describe('loadFeatures', () => {
           'no-setup-ctx',
           {
             onSetup: null,
-            onEach: ({ ctx }: { ctx: unknown }) => { receivedCtx = ctx; },
+            onEach: ({ ctx }: { ctx: unknown }) => {
+              receivedCtx = ctx;
+            },
             selectors: ['[data-u]'],
           },
           { priority: 1 },
@@ -644,9 +812,33 @@ describe('loadFeatures', () => {
     it('resolves all features with equal priority', async () => {
       const order: string[] = [];
       const features = [
-        makeLoadable('first', { onSetup: () => { order.push('first'); } }, { global: true, priority: 10 }),
-        makeLoadable('second', { onSetup: () => { order.push('second'); } }, { global: true, priority: 10 }),
-        makeLoadable('third', { onSetup: () => { order.push('third'); } }, { global: true, priority: 10 }),
+        makeLoadable(
+          'first',
+          {
+            onSetup: () => {
+              order.push('first');
+            },
+          },
+          { global: true, priority: 10 },
+        ),
+        makeLoadable(
+          'second',
+          {
+            onSetup: () => {
+              order.push('second');
+            },
+          },
+          { global: true, priority: 10 },
+        ),
+        makeLoadable(
+          'third',
+          {
+            onSetup: () => {
+              order.push('third');
+            },
+          },
+          { global: true, priority: 10 },
+        ),
       ];
 
       await loadFeatures(features);
@@ -685,9 +877,21 @@ describe('loadFeatures', () => {
       const ySetup = vi.fn();
       const zSetup = vi.fn();
       const features = [
-        makeLoadable('x', { onSetup: xSetup }, { global: true, priority: 1, dependencies: ['z'], timeout: 100 }),
-        makeLoadable('y', { onSetup: ySetup }, { global: true, priority: 2, dependencies: ['x'], timeout: 100 }),
-        makeLoadable('z', { onSetup: zSetup }, { global: true, priority: 3, dependencies: ['y'], timeout: 100 }),
+        makeLoadable(
+          'x',
+          { onSetup: xSetup },
+          { global: true, priority: 1, dependencies: ['z'], timeout: 100 },
+        ),
+        makeLoadable(
+          'y',
+          { onSetup: ySetup },
+          { global: true, priority: 2, dependencies: ['x'], timeout: 100 },
+        ),
+        makeLoadable(
+          'z',
+          { onSetup: zSetup },
+          { global: true, priority: 3, dependencies: ['y'], timeout: 100 },
+        ),
       ];
 
       await loadFeatures(features, { timeout: 100 });
@@ -729,7 +933,11 @@ describe('loadFeatures', () => {
           { onSetup: noop },
           { global: true, priority: 1, dependencies: ['parent'], timeout: 0 },
         ),
-        makeLoadable('parent', { onSetup: noop }, { global: true, priority: 2 }),
+        makeLoadable(
+          'parent',
+          { onSetup: noop },
+          { global: true, priority: 2 },
+        ),
       ];
 
       await loadFeatures(features, { timeout: 0 });
@@ -748,23 +956,33 @@ describe('loadFeatures', () => {
 
     it('runs same-priority features concurrently', async () => {
       let barrierResolve: () => void;
-      const barrier = new Promise<void>((r) => { barrierResolve = r; });
+      const barrier = new Promise<void>((r) => {
+        barrierResolve = r;
+      });
       let slowStarted = false;
       let fastRanWhileSlowWaiting = false;
 
       const features = [
-        makeLoadable('slow', {
-          onSetup: async () => {
-            slowStarted = true;
-            await barrier;
+        makeLoadable(
+          'slow',
+          {
+            onSetup: async () => {
+              slowStarted = true;
+              await barrier;
+            },
           },
-        }, { global: true, priority: 10 }),
-        makeLoadable('fast', {
-          onSetup: () => {
-            if (slowStarted) fastRanWhileSlowWaiting = true;
-            barrierResolve!();
+          { global: true, priority: 10 },
+        ),
+        makeLoadable(
+          'fast',
+          {
+            onSetup: () => {
+              if (slowStarted) fastRanWhileSlowWaiting = true;
+              barrierResolve!();
+            },
           },
-        }, { global: true, priority: 10 }),
+          { global: true, priority: 10 },
+        ),
       ];
 
       await loadFeatures(features);
@@ -776,10 +994,42 @@ describe('loadFeatures', () => {
     it('resolves all dependents when multiple features depend on the same feature (same wave)', async () => {
       const order: string[] = [];
       const features = [
-        makeLoadable('a', { onSetup: () => { order.push('a'); } }, { global: true, priority: 10 }),
-        makeLoadable('f1', { onSetup: () => { order.push('f1'); } }, { global: true, priority: 10, dependencies: ['a'] }),
-        makeLoadable('f2', { onSetup: () => { order.push('f2'); } }, { global: true, priority: 10, dependencies: ['a'] }),
-        makeLoadable('f3', { onSetup: () => { order.push('f3'); } }, { global: true, priority: 10, dependencies: ['a'] }),
+        makeLoadable(
+          'a',
+          {
+            onSetup: () => {
+              order.push('a');
+            },
+          },
+          { global: true, priority: 10 },
+        ),
+        makeLoadable(
+          'f1',
+          {
+            onSetup: () => {
+              order.push('f1');
+            },
+          },
+          { global: true, priority: 10, dependencies: ['a'] },
+        ),
+        makeLoadable(
+          'f2',
+          {
+            onSetup: () => {
+              order.push('f2');
+            },
+          },
+          { global: true, priority: 10, dependencies: ['a'] },
+        ),
+        makeLoadable(
+          'f3',
+          {
+            onSetup: () => {
+              order.push('f3');
+            },
+          },
+          { global: true, priority: 10, dependencies: ['a'] },
+        ),
       ];
 
       await loadFeatures(features);
@@ -796,10 +1046,42 @@ describe('loadFeatures', () => {
     it('resolves all dependents when multiple features depend on the same feature (cross wave)', async () => {
       const order: string[] = [];
       const features = [
-        makeLoadable('a', { onSetup: () => { order.push('a'); } }, { global: true, priority: 1 }),
-        makeLoadable('f1', { onSetup: () => { order.push('f1'); } }, { global: true, priority: 5, dependencies: ['a'] }),
-        makeLoadable('f2', { onSetup: () => { order.push('f2'); } }, { global: true, priority: 5, dependencies: ['a'] }),
-        makeLoadable('f3', { onSetup: () => { order.push('f3'); } }, { global: true, priority: 5, dependencies: ['a'] }),
+        makeLoadable(
+          'a',
+          {
+            onSetup: () => {
+              order.push('a');
+            },
+          },
+          { global: true, priority: 1 },
+        ),
+        makeLoadable(
+          'f1',
+          {
+            onSetup: () => {
+              order.push('f1');
+            },
+          },
+          { global: true, priority: 5, dependencies: ['a'] },
+        ),
+        makeLoadable(
+          'f2',
+          {
+            onSetup: () => {
+              order.push('f2');
+            },
+          },
+          { global: true, priority: 5, dependencies: ['a'] },
+        ),
+        makeLoadable(
+          'f3',
+          {
+            onSetup: () => {
+              order.push('f3');
+            },
+          },
+          { global: true, priority: 5, dependencies: ['a'] },
+        ),
       ];
 
       await loadFeatures(features);
@@ -813,8 +1095,24 @@ describe('loadFeatures', () => {
     it('promotes feature to later wave when it depends on a higher-priority feature', async () => {
       const order: string[] = [];
       const features = [
-        makeLoadable('early', { onSetup: () => { order.push('early'); } }, { global: true, priority: 1, dependencies: ['late'] }),
-        makeLoadable('late', { onSetup: () => { order.push('late'); } }, { global: true, priority: 25 }),
+        makeLoadable(
+          'early',
+          {
+            onSetup: () => {
+              order.push('early');
+            },
+          },
+          { global: true, priority: 1, dependencies: ['late'] },
+        ),
+        makeLoadable(
+          'late',
+          {
+            onSetup: () => {
+              order.push('late');
+            },
+          },
+          { global: true, priority: 25 },
+        ),
       ];
 
       await loadFeatures(features);
@@ -828,10 +1126,42 @@ describe('loadFeatures', () => {
     it('resolves diamond dependency across waves', async () => {
       const order: string[] = [];
       const features = [
-        makeLoadable('d', { onSetup: () => { order.push('d'); } }, { global: true, priority: 1 }),
-        makeLoadable('b', { onSetup: () => { order.push('b'); } }, { global: true, priority: 5, dependencies: ['d'] }),
-        makeLoadable('c', { onSetup: () => { order.push('c'); } }, { global: true, priority: 5, dependencies: ['d'] }),
-        makeLoadable('a', { onSetup: () => { order.push('a'); } }, { global: true, priority: 10, dependencies: ['b', 'c'] }),
+        makeLoadable(
+          'd',
+          {
+            onSetup: () => {
+              order.push('d');
+            },
+          },
+          { global: true, priority: 1 },
+        ),
+        makeLoadable(
+          'b',
+          {
+            onSetup: () => {
+              order.push('b');
+            },
+          },
+          { global: true, priority: 5, dependencies: ['d'] },
+        ),
+        makeLoadable(
+          'c',
+          {
+            onSetup: () => {
+              order.push('c');
+            },
+          },
+          { global: true, priority: 5, dependencies: ['d'] },
+        ),
+        makeLoadable(
+          'a',
+          {
+            onSetup: () => {
+              order.push('a');
+            },
+          },
+          { global: true, priority: 10, dependencies: ['b', 'c'] },
+        ),
       ];
 
       await loadFeatures(features);
@@ -850,8 +1180,24 @@ describe('loadFeatures', () => {
     it('executes waves sequentially with numeric sort (p=2 before p=10)', async () => {
       const order: string[] = [];
       const features = [
-        makeLoadable('ten', { onSetup: () => { order.push('ten'); } }, { global: true, priority: 10 }),
-        makeLoadable('two', { onSetup: () => { order.push('two'); } }, { global: true, priority: 2 }),
+        makeLoadable(
+          'ten',
+          {
+            onSetup: () => {
+              order.push('ten');
+            },
+          },
+          { global: true, priority: 10 },
+        ),
+        makeLoadable(
+          'two',
+          {
+            onSetup: () => {
+              order.push('two');
+            },
+          },
+          { global: true, priority: 2 },
+        ),
       ];
 
       await loadFeatures(features);
@@ -864,9 +1210,21 @@ describe('loadFeatures', () => {
       const bSetup = vi.fn();
       const cSetup = vi.fn();
       const features = [
-        makeLoadable('a', { onSetup: aSetup }, { global: true, priority: 1, dependencies: ['b'], timeout: 0 }),
-        makeLoadable('b', { onSetup: bSetup }, { global: true, priority: 1, dependencies: ['a'], timeout: 0 }),
-        makeLoadable('c', { onSetup: cSetup }, { global: true, priority: 2, dependencies: ['a'] }),
+        makeLoadable(
+          'a',
+          { onSetup: aSetup },
+          { global: true, priority: 1, dependencies: ['b'], timeout: 0 },
+        ),
+        makeLoadable(
+          'b',
+          { onSetup: bSetup },
+          { global: true, priority: 1, dependencies: ['a'], timeout: 0 },
+        ),
+        makeLoadable(
+          'c',
+          { onSetup: cSetup },
+          { global: true, priority: 2, dependencies: ['a'] },
+        ),
       ];
 
       await loadFeatures(features, { timeout: 0 });
@@ -879,8 +1237,16 @@ describe('loadFeatures', () => {
     it('unblocks dependent when feature is disabled (enabled: false)', async () => {
       const onSetup = vi.fn();
       const features = [
-        makeLoadable('disabled-feat', { enabled: false, onSetup: noop }, { global: true, priority: 1 }),
-        makeLoadable('dependent', { onSetup }, { global: true, priority: 2, dependencies: ['disabled-feat'] }),
+        makeLoadable(
+          'disabled-feat',
+          { enabled: false, onSetup: noop },
+          { global: true, priority: 1 },
+        ),
+        makeLoadable(
+          'dependent',
+          { onSetup },
+          { global: true, priority: 2, dependencies: ['disabled-feat'] },
+        ),
       ];
 
       await loadFeatures(features);
@@ -891,8 +1257,16 @@ describe('loadFeatures', () => {
     it('unblocks dependent when onSetup returns false (abort)', async () => {
       const onSetup = vi.fn();
       const features = [
-        makeLoadable('aborted-feat', { onSetup: () => false }, { global: true, priority: 1 }),
-        makeLoadable('dependent', { onSetup }, { global: true, priority: 2, dependencies: ['aborted-feat'] }),
+        makeLoadable(
+          'aborted-feat',
+          { onSetup: () => false },
+          { global: true, priority: 1 },
+        ),
+        makeLoadable(
+          'dependent',
+          { onSetup },
+          { global: true, priority: 2, dependencies: ['aborted-feat'] },
+        ),
       ];
 
       await loadFeatures(features);
@@ -903,7 +1277,11 @@ describe('loadFeatures', () => {
     it('warns and ignores self-dependency', async () => {
       const onSetup = vi.fn();
       const features = [
-        makeLoadable('self-dep', { onSetup }, { global: true, priority: 1, dependencies: ['self-dep'] }),
+        makeLoadable(
+          'self-dep',
+          { onSetup },
+          { global: true, priority: 1, dependencies: ['self-dep'] },
+        ),
       ];
 
       await loadFeatures(features);
@@ -917,16 +1295,41 @@ describe('loadFeatures', () => {
     it('cascades promotion across 3 levels', async () => {
       const order: string[] = [];
       const features = [
-        makeLoadable('a', { onSetup: () => { order.push('a'); } }, { global: true, priority: 1, dependencies: ['b'] }),
-        makeLoadable('b', { onSetup: () => { order.push('b'); } }, { global: true, priority: 5, dependencies: ['c'] }),
-        makeLoadable('c', { onSetup: () => { order.push('c'); } }, { global: true, priority: 10 }),
+        makeLoadable(
+          'a',
+          {
+            onSetup: () => {
+              order.push('a');
+            },
+          },
+          { global: true, priority: 1, dependencies: ['b'] },
+        ),
+        makeLoadable(
+          'b',
+          {
+            onSetup: () => {
+              order.push('b');
+            },
+          },
+          { global: true, priority: 5, dependencies: ['c'] },
+        ),
+        makeLoadable(
+          'c',
+          {
+            onSetup: () => {
+              order.push('c');
+            },
+          },
+          { global: true, priority: 10 },
+        ),
       ];
 
       await loadFeatures(features);
 
       expect(order).toEqual(['c', 'b', 'a']);
       const promotionWarnings = warnSpy.mock.calls.filter(
-        (c) => typeof c[0] === 'string' && c[0].includes('promoted from priority'),
+        (c) =>
+          typeof c[0] === 'string' && c[0].includes('promoted from priority'),
       );
       expect(promotionWarnings).toHaveLength(2);
     });
@@ -936,9 +1339,21 @@ describe('loadFeatures', () => {
       const ySetup = vi.fn();
       const zSetup = vi.fn();
       const features = [
-        makeLoadable('x', { onSetup: xSetup }, { global: true, priority: 1, dependencies: ['z'], timeout: 0 }),
-        makeLoadable('y', { onSetup: ySetup }, { global: true, priority: 2, dependencies: ['x'], timeout: 0 }),
-        makeLoadable('z', { onSetup: zSetup }, { global: true, priority: 3, dependencies: ['y'], timeout: 0 }),
+        makeLoadable(
+          'x',
+          { onSetup: xSetup },
+          { global: true, priority: 1, dependencies: ['z'], timeout: 0 },
+        ),
+        makeLoadable(
+          'y',
+          { onSetup: ySetup },
+          { global: true, priority: 2, dependencies: ['x'], timeout: 0 },
+        ),
+        makeLoadable(
+          'z',
+          { onSetup: zSetup },
+          { global: true, priority: 3, dependencies: ['y'], timeout: 0 },
+        ),
       ];
 
       await loadFeatures(features, { timeout: 0 });
@@ -951,10 +1366,14 @@ describe('loadFeatures', () => {
     it('does not run onReady after timeout fires during onSetup', async () => {
       const onReady = vi.fn();
       const features = [
-        makeLoadable('slow', {
-          onSetup: () => new Promise((resolve) => setTimeout(resolve, 200)),
-          onReady,
-        }, { global: true, priority: 1, timeout: 50 }),
+        makeLoadable(
+          'slow',
+          {
+            onSetup: () => new Promise((resolve) => setTimeout(resolve, 200)),
+            onReady,
+          },
+          { global: true, priority: 1, timeout: 50 },
+        ),
       ];
 
       await loadFeatures(features);
@@ -964,18 +1383,23 @@ describe('loadFeatures', () => {
     });
 
     it('does not run remaining onEach or onReady after timeout fires mid-loop', async () => {
-      document.body.innerHTML = '<div data-t></div><div data-t></div><div data-t></div>';
+      document.body.innerHTML =
+        '<div data-t></div><div data-t></div><div data-t></div>';
       const onEach = vi.fn(
         () => new Promise<void>((resolve) => setTimeout(resolve, 100)),
       );
       const onReady = vi.fn();
       const features = [
-        makeLoadable('slow-each', {
-          onSetup: noop,
-          onEach,
-          onReady,
-          selectors: ['[data-t]'],
-        }, { priority: 1, timeout: 50 }),
+        makeLoadable(
+          'slow-each',
+          {
+            onSetup: noop,
+            onEach,
+            onReady,
+            selectors: ['[data-t]'],
+          },
+          { priority: 1, timeout: 50 },
+        ),
       ];
 
       await loadFeatures(features);
@@ -988,12 +1412,20 @@ describe('loadFeatures', () => {
     it('does not run onSetup after timeout fires during dep wait', async () => {
       const onSetup = vi.fn();
       const features = [
-        makeLoadable('blocker', {
-          onSetup: () => new Promise((resolve) => setTimeout(resolve, 200)),
-        }, { global: true, priority: 1 }),
-        makeLoadable('waiter', {
-          onSetup,
-        }, { global: true, priority: 1, dependencies: ['blocker'], timeout: 50 }),
+        makeLoadable(
+          'blocker',
+          {
+            onSetup: () => new Promise((resolve) => setTimeout(resolve, 200)),
+          },
+          { global: true, priority: 1 },
+        ),
+        makeLoadable(
+          'waiter',
+          {
+            onSetup,
+          },
+          { global: true, priority: 1, dependencies: ['blocker'], timeout: 50 },
+        ),
       ];
 
       await loadFeatures(features);
@@ -1005,9 +1437,33 @@ describe('loadFeatures', () => {
     it('pruned circular dep does not affect non-circular deps', async () => {
       const order: string[] = [];
       const features = [
-        makeLoadable('a', { onSetup: () => { order.push('a'); } }, { global: true, priority: 1, dependencies: ['b', 'c'] }),
-        makeLoadable('b', { onSetup: () => { order.push('b'); } }, { global: true, priority: 2, dependencies: ['a'] }),
-        makeLoadable('c', { onSetup: () => { order.push('c'); } }, { global: true, priority: 3 }),
+        makeLoadable(
+          'a',
+          {
+            onSetup: () => {
+              order.push('a');
+            },
+          },
+          { global: true, priority: 1, dependencies: ['b', 'c'] },
+        ),
+        makeLoadable(
+          'b',
+          {
+            onSetup: () => {
+              order.push('b');
+            },
+          },
+          { global: true, priority: 2, dependencies: ['a'] },
+        ),
+        makeLoadable(
+          'c',
+          {
+            onSetup: () => {
+              order.push('c');
+            },
+          },
+          { global: true, priority: 3 },
+        ),
       ];
 
       await loadFeatures(features, { timeout: 0 });
@@ -1029,7 +1485,7 @@ describe('loadFeatures — expose + deps (#36)', () => {
     warnSpy = vi.spyOn(console, 'warn').mockImplementation(noop);
   });
 
-  it('passes only direct dependencies\' exposed values to onSetup (AC-1, AC-7)', async () => {
+  it("passes only direct dependencies' exposed values to onSetup (AC-1, AC-7)", async () => {
     let seenDeps: Record<string, unknown> | undefined;
     const features = [
       makeLoadable(
@@ -1044,7 +1500,11 @@ describe('loadFeatures — expose + deps (#36)', () => {
       ),
       makeLoadable(
         'consumer',
-        { onSetup: (_s, { deps }) => { seenDeps = deps; } },
+        {
+          onSetup: (_s, { deps }) => {
+            seenDeps = deps;
+          },
+        },
         { global: true, priority: 2, dependencies: ['producer'] },
       ),
     ];
@@ -1068,12 +1528,22 @@ describe('loadFeatures — expose + deps (#36)', () => {
       ),
       makeLoadable(
         'b',
-        { onSetup: (_s, { deps }) => { bDeps = deps; return 'b-value'; }, expose: () => 'b-value' },
+        {
+          onSetup: (_s, { deps }) => {
+            bDeps = deps;
+            return 'b-value';
+          },
+          expose: () => 'b-value',
+        },
         { global: true, priority: 2, dependencies: ['a'] },
       ),
       makeLoadable(
         'c',
-        { onSetup: (_s, { deps }) => { cDeps = deps; } },
+        {
+          onSetup: (_s, { deps }) => {
+            cDeps = deps;
+          },
+        },
         { global: true, priority: 3, dependencies: ['b'] },
       ),
     ];
@@ -1098,7 +1568,11 @@ describe('loadFeatures — expose + deps (#36)', () => {
       ),
       makeLoadable(
         'consumer',
-        { onSetup: (_s, { deps }) => { seenDeps = deps; } },
+        {
+          onSetup: (_s, { deps }) => {
+            seenDeps = deps;
+          },
+        },
         { global: true, priority: 2, dependencies: ['producer'] },
       ),
     ];
@@ -1120,7 +1594,11 @@ describe('loadFeatures — expose + deps (#36)', () => {
       ),
       makeLoadable(
         'consumer',
-        { onSetup: (_s, { deps }) => { seenDeps = deps; } },
+        {
+          onSetup: (_s, { deps }) => {
+            seenDeps = deps;
+          },
+        },
         { global: true, priority: 2, dependencies: ['producer'] },
       ),
     ];
@@ -1136,7 +1614,12 @@ describe('loadFeatures — expose + deps (#36)', () => {
     const features = [
       makeLoadable(
         'producer',
-        { onSetup: () => { throw new Error('setup failed'); }, expose: () => 'v' },
+        {
+          onSetup: () => {
+            throw new Error('setup failed');
+          },
+          expose: () => 'v',
+        },
         { global: true, priority: 1, timeout: 100 },
       ),
       makeLoadable(
@@ -1159,7 +1642,12 @@ describe('loadFeatures — expose + deps (#36)', () => {
     const features = [
       makeLoadable(
         'producer',
-        { onSetup: () => ({}), expose: () => { throw new Error('expose boom'); } },
+        {
+          onSetup: () => ({}),
+          expose: () => {
+            throw new Error('expose boom');
+          },
+        },
         { global: true, priority: 1, timeout: 100 },
       ),
       makeLoadable(
@@ -1188,7 +1676,11 @@ describe('loadFeatures — expose + deps (#36)', () => {
       ),
       makeLoadable(
         'consumer',
-        { onSetup: (_s, { deps }) => { seenDeps = deps; } },
+        {
+          onSetup: (_s, { deps }) => {
+            seenDeps = deps;
+          },
+        },
         { global: true, priority: 2, dependencies: ['producer'] },
       ),
     ];
@@ -1209,7 +1701,11 @@ describe('loadFeatures — expose + deps (#36)', () => {
       ),
       makeLoadable(
         'consumer',
-        { onSetup: (_s, { deps }) => { seenDeps = deps; } },
+        {
+          onSetup: (_s, { deps }) => {
+            seenDeps = deps;
+          },
+        },
         { global: true, priority: 2, dependencies: ['producer'] },
       ),
     ];
@@ -1231,12 +1727,20 @@ describe('loadFeatures — expose + deps (#36)', () => {
       ),
       makeLoadable(
         'b',
-        { onSetup: (_s, { deps }) => { depsB = deps; } },
+        {
+          onSetup: (_s, { deps }) => {
+            depsB = deps;
+          },
+        },
         { global: true, priority: 2, dependencies: ['a'] },
       ),
       makeLoadable(
         'c',
-        { onSetup: (_s, { deps }) => { depsC = deps; } },
+        {
+          onSetup: (_s, { deps }) => {
+            depsC = deps;
+          },
+        },
         { global: true, priority: 2, dependencies: ['a'] },
       ),
     ];
@@ -1259,7 +1763,11 @@ describe('loadFeatures — expose + deps (#36)', () => {
       ),
       makeLoadable(
         'consumer',
-        { onSetup: (_s, { deps }) => { seenDeps = deps; } },
+        {
+          onSetup: (_s, { deps }) => {
+            seenDeps = deps;
+          },
+        },
         { global: true, priority: 2, dependencies: ['producer'] },
       ),
     ];
@@ -1286,12 +1794,20 @@ describe('loadFeatures — expose + deps (#36)', () => {
       ),
       makeLoadable(
         'cf',
-        { onSetup: (_s, { deps }) => { depsFalse = deps; } },
+        {
+          onSetup: (_s, { deps }) => {
+            depsFalse = deps;
+          },
+        },
         { global: true, priority: 2, dependencies: ['pf'] },
       ),
       makeLoadable(
         'cn',
-        { onSetup: (_s, { deps }) => { depsNull = deps; } },
+        {
+          onSetup: (_s, { deps }) => {
+            depsNull = deps;
+          },
+        },
         { global: true, priority: 2, dependencies: ['pn'] },
       ),
     ];
@@ -1308,12 +1824,24 @@ describe('loadFeatures — expose + deps (#36)', () => {
     const features = [
       makeLoadable(
         'a',
-        { onSetup: (_s, { deps }) => { depsA = deps; return {}; }, expose: (ctx) => ctx },
+        {
+          onSetup: (_s, { deps }) => {
+            depsA = deps;
+            return {};
+          },
+          expose: (ctx) => ctx,
+        },
         { global: true, priority: 1, dependencies: ['b'] },
       ),
       makeLoadable(
         'b',
-        { onSetup: (_s, { deps }) => { depsB = deps; return {}; }, expose: (ctx) => ctx },
+        {
+          onSetup: (_s, { deps }) => {
+            depsB = deps;
+            return {};
+          },
+          expose: (ctx) => ctx,
+        },
         { global: true, priority: 2, dependencies: ['a'] },
       ),
     ];
@@ -1340,7 +1868,11 @@ describe('loadFeatures — expose + deps (#36)', () => {
       ),
       makeLoadable(
         'consumer',
-        { onSetup: (_s, { deps }) => { seenValue = deps['producer']; } },
+        {
+          onSetup: (_s, { deps }) => {
+            seenValue = deps['producer'];
+          },
+        },
         { global: true, priority: 1, dependencies: ['producer'] },
       ),
     ];
@@ -1383,7 +1915,11 @@ describe('loadFeatures — expose + deps (#36)', () => {
     const features = [
       makeLoadable(
         'solo',
-        { onSetup: (_s, { deps }) => { seenDeps = deps; } },
+        {
+          onSetup: (_s, { deps }) => {
+            seenDeps = deps;
+          },
+        },
         { global: true, priority: 1 },
       ),
     ];
@@ -1394,7 +1930,7 @@ describe('loadFeatures — expose + deps (#36)', () => {
     expect(Object.keys(seenDeps!)).toHaveLength(0);
   });
 
-  it('delivers the exposed value when a dependent is promoted to its dependency\'s wave (AC-7, promotion)', async () => {
+  it("delivers the exposed value when a dependent is promoted to its dependency's wave (AC-7, promotion)", async () => {
     // The dependent declares a LOWER priority number than its dependency, so the loader
     // promotes it from wave 1 to the dependency's wave (2) — both then run gated in the same
     // wave. Verifies the exposed value still reaches the dependent after promotion.
@@ -1403,7 +1939,11 @@ describe('loadFeatures — expose + deps (#36)', () => {
     const features = [
       makeLoadable(
         'consumer',
-        { onSetup: (_s, { deps }) => { seenValue = deps['producer']; } },
+        {
+          onSetup: (_s, { deps }) => {
+            seenValue = deps['producer'];
+          },
+        },
         { global: true, priority: 1, dependencies: ['producer'] },
       ),
       makeLoadable(
@@ -1431,7 +1971,7 @@ describe('loadFeatures — expose + deps integration (#38)', () => {
     warnSpy = vi.spyOn(console, 'warn').mockImplementation(noop);
   });
 
-  it('passes a dependency\'s exposed value to the dependent via deps (AC-1)', async () => {
+  it("passes a dependency's exposed value to the dependent via deps (AC-1)", async () => {
     let seenDeps: Record<string, unknown> | undefined;
     const features = [
       defineLoadable({
@@ -1448,7 +1988,9 @@ describe('loadFeatures — expose + deps integration (#38)', () => {
         priority: 2,
         global: true,
         dependencies: ['producer'],
-        onSetup: (_s, { deps }) => { seenDeps = deps; },
+        onSetup: (_s, { deps }) => {
+          seenDeps = deps;
+        },
       }),
     ];
 
@@ -1473,7 +2015,9 @@ describe('loadFeatures — expose + deps integration (#38)', () => {
         priority: 2,
         global: true,
         dependencies: ['producer'],
-        onSetup: (_s, { deps }) => { seenDeps = deps; },
+        onSetup: (_s, { deps }) => {
+          seenDeps = deps;
+        },
       }),
     ];
 
@@ -1501,7 +2045,9 @@ describe('loadFeatures — expose + deps integration (#38)', () => {
         priority: 2,
         global: true,
         dependencies: ['producer'],
-        onSetup: (_s, { deps }) => { seenDeps = deps; },
+        onSetup: (_s, { deps }) => {
+          seenDeps = deps;
+        },
       }),
     ];
 
@@ -1520,7 +2066,9 @@ describe('loadFeatures — expose + deps integration (#38)', () => {
         selectors: [],
         priority: 1,
         global: true,
-        onSetup: () => { throw new Error('setup failed'); },
+        onSetup: () => {
+          throw new Error('setup failed');
+        },
       }),
       defineLoadable({
         id: 'consumer',
@@ -1549,7 +2097,9 @@ describe('loadFeatures — expose + deps integration (#38)', () => {
         priority: 1,
         global: true,
         dependencies: ['b'],
-        onSetup: () => { order.push('a'); },
+        onSetup: () => {
+          order.push('a');
+        },
       }),
       defineLoadable({
         id: 'b',
@@ -1557,7 +2107,9 @@ describe('loadFeatures — expose + deps integration (#38)', () => {
         priority: 2,
         global: true,
         dependencies: ['a'],
-        onSetup: () => { order.push('b'); },
+        onSetup: () => {
+          order.push('b');
+        },
       }),
     ];
 
@@ -1589,7 +2141,10 @@ describe('loadFeatures — expose + deps integration (#38)', () => {
         global: true,
         dependencies: ['a'],
         // Reads its own direct dep so the A→B leg is load-bearing (not a hardcoded return).
-        onSetup: (_s, { deps }) => { seenDepsB = deps; return 'value-b'; },
+        onSetup: (_s, { deps }) => {
+          seenDepsB = deps;
+          return 'value-b';
+        },
         expose: (ctx) => ctx,
       }),
       defineLoadable({
@@ -1598,7 +2153,9 @@ describe('loadFeatures — expose + deps integration (#38)', () => {
         priority: 3,
         global: true,
         dependencies: ['b'],
-        onSetup: (_s, { deps }) => { seenDepsC = deps; },
+        onSetup: (_s, { deps }) => {
+          seenDepsC = deps;
+        },
       }),
     ];
 
@@ -1621,7 +2178,9 @@ describe('loadFeatures — expose + deps integration (#38)', () => {
         priority: 1,
         global: true,
         onSetup: () => ({}),
-        expose: () => { throw new Error('expose boom'); },
+        expose: () => {
+          throw new Error('expose boom');
+        },
       }),
       defineLoadable({
         id: 'consumer',
@@ -1662,7 +2221,9 @@ describe('loadFeatures — expose + deps integration (#38)', () => {
         priority: 1,
         global: true,
         dependencies: ['producer'],
-        onSetup: (_s, { deps }) => { seenValue = deps['producer']; },
+        onSetup: (_s, { deps }) => {
+          seenValue = deps['producer'];
+        },
       }),
     ];
 
@@ -1679,9 +2240,16 @@ describe('loadFeatures — expose + deps integration (#38)', () => {
         id: 'plain',
         selectors: ['[data-plain]'],
         priority: 1,
-        onSetup: () => { order.push('setup'); return { n: 1 }; },
-        onEach: ({ ctx }) => { order.push(`each:${(ctx as { n: number }).n}`); },
-        onReady: () => { order.push('ready'); },
+        onSetup: () => {
+          order.push('setup');
+          return { n: 1 };
+        },
+        onEach: ({ ctx }) => {
+          order.push(`each:${(ctx as { n: number }).n}`);
+        },
+        onReady: () => {
+          order.push('ready');
+        },
       }),
     ];
 
