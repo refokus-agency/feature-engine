@@ -58,7 +58,7 @@
     "lint": "biome lint --write ./src",
     "lint:report": "biome lint ./src",
     "format": "biome format --write ./src",
-    "test": "vitest run",
+    "test": "vitest run --coverage",
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",
     "test:ui": "vitest --ui",
