@@ -29,6 +29,41 @@ const REQUIRED_GITHUB_TEMPLATES = [
   '.github/pull_request_template.md',
 ] as const;
 
+/**
+ * Repo-config files under `.github/` — same silent-failure class as the
+ * templates above (GitHub ignores what is not committed), but not templates,
+ * so they are guarded separately.
+ */
+const REQUIRED_GITHUB_CONFIG = ['.github/dependabot.yml'] as const;
+
+/**
+ * The `cooldown` floor on the npm ecosystem block, mirroring `min-release-age=3`
+ * in `.npmrc`. Stated once here so the assertion below has a single source.
+ */
+const DEPENDABOT_COOLDOWN_DAYS = 3;
+
+/**
+ * Line that opens the `github-actions` entry. Splitting the raw config here lets
+ * each ecosystem block be asserted separately without a YAML parser — a
+ * file-wide match would accept `cooldown` sitting under `github-actions`, where
+ * GitHub ignores it, while the npm block carries no floor at all.
+ */
+const DEPENDABOT_GITHUB_ACTIONS_ENTRY =
+  '- package-ecosystem: "github-actions"';
+
+/**
+ * Package names that would pull a YAML parser into the toolchain. The
+ * Dependabot assertions below are deliberately raw-text so none of these is
+ * needed — this list keeps that decision enforced rather than aspirational.
+ */
+const YAML_PARSER_PACKAGES = [
+  'yaml',
+  'js-yaml',
+  'yamljs',
+  'yaml-js',
+  '@types/js-yaml',
+] as const;
+
 const EXPECTED_KEYWORDS = [
   'webflow',
   'feature-loading',
@@ -91,6 +126,58 @@ describe('packaging — GitHub templates', () => {
       expect(isTrackedByGit(file)).toBe(true);
     });
   }
+});
+
+describe('packaging — Dependabot config', () => {
+  for (const file of REQUIRED_GITHUB_CONFIG) {
+    it(`has ${file} present on disk`, () => {
+      expect(existsSync(resolve(repoRoot, file))).toBe(true);
+    });
+
+    it(`has ${file} tracked by git, not just present locally`, () => {
+      expect(isTrackedByGit(file)).toBe(true);
+    });
+  }
+
+  /**
+   * The assertion with teeth. Re-syncing this config from another repo drops
+   * the `cooldown` block — none of the reference configs carry one — and the
+   * 3-day floor would disappear with nothing else noticing.
+   *
+   * The floor is pinned to the npm block, and the `github-actions` block is
+   * asserted to carry no `cooldown` key at all: `cooldown` is unsupported for
+   * that ecosystem, so a floor that drifts into it is silently ignored by
+   * GitHub while reading as if the policy were still in force.
+   */
+  it(`keeps the ${DEPENDABOT_COOLDOWN_DAYS}-day cooldown floor on the npm ecosystem`, () => {
+    const config = readFileSync(
+      resolve(repoRoot, '.github/dependabot.yml'),
+      'utf8',
+    );
+    const splitAt = config.indexOf(DEPENDABOT_GITHUB_ACTIONS_ENTRY);
+
+    expect(splitAt).toBeGreaterThan(-1);
+
+    // `\s*$` rather than `\b` so the day count is matched as a whole value —
+    // `\b` also accepts `3.5`, `3,` and any other non-word suffix.
+    expect(config.slice(0, splitAt)).toMatch(
+      new RegExp(
+        `cooldown:\\s*\\n\\s*default-days:\\s*${DEPENDABOT_COOLDOWN_DAYS}\\s*$`,
+        'm',
+      ),
+    );
+    expect(config.slice(splitAt)).not.toMatch(/^\s*cooldown:/m);
+  });
+
+  it('asserts on the config without a YAML-parsing devDependency', () => {
+    const { devDependencies } = JSON.parse(
+      readFileSync(resolve(repoRoot, 'package.json'), 'utf8'),
+    ) as { devDependencies: Record<string, string> };
+
+    expect(
+      YAML_PARSER_PACKAGES.filter((pkg) => pkg in devDependencies),
+    ).toEqual([]);
+  });
 });
 
 describe('packaging — README badges', () => {
