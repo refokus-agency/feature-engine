@@ -1,5 +1,7 @@
 # @refokus-agency/feature-engine
 
+[![CI](https://github.com/refokus-agency/feature-engine/actions/workflows/pr-ci.yml/badge.svg)](https://github.com/refokus-agency/feature-engine/actions/workflows/pr-ci.yml)
+[![npm version](https://img.shields.io/npm/v/@refokus-agency/feature-engine.svg)](https://www.npmjs.com/package/@refokus-agency/feature-engine)
 [![License: Apache-2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE)
 
 Declarative feature loading system with code splitting for Webflow projects. Define features as isolated modules, let the engine handle DOM matching, dependency resolution, and lifecycle execution.
