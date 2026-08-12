@@ -38,14 +38,14 @@ dependencies.
 
 ```bash
 npm install            # install dependencies
-npm test               # run the test suite once (Vitest)
-npm run test:watch     # run tests in watch mode
-npm run test:coverage  # run tests with a coverage report
+npm test               # run the test suite once, with the coverage gate (Vitest)
+npm run test:watch     # run tests in watch mode (no coverage)
+npm run test:coverage  # alias for the same coverage run
 npm run test:ui        # run tests in the Vitest UI
 npm run typecheck      # TypeScript type check, no emit
-npm run lint           # ESLint, WRITES fixes to ./src
-npm run lint:report    # ESLint, read-only — use this to verify
-npm run format         # Prettier, writes to ./src
+npm run lint           # Biome lint, WRITES fixes to ./src
+npm run lint:report    # Biome lint, read-only — use this to verify
+npm run format         # Biome formatter, writes to ./src
 npm run build          # compile TypeScript to ./dist
 npm run build:clean    # remove dist and rebuild
 npm run build:watch    # compile in watch mode
@@ -53,8 +53,8 @@ npm run bench          # run the Vitest benchmarks
 npm run commit         # Conventional Commit wizard
 ```
 
-`npm run lint` carries `--fix` and `npm run format` carries `--write`; both
-modify your files. When you only want to *check* whether linting passes, use
+`npm run lint` and `npm run format` both carry Biome's `--write`; both modify
+your files. When you only want to *check* whether linting passes, use
 `npm run lint:report` — it reports without mutating anything, which is what you
 want inside a verification chain.
 
@@ -64,6 +64,39 @@ To run a single test file or pattern:
 npx vitest run src/__tests__/loader.test.ts   # one file
 npx vitest run -t "should export"             # by test name
 ```
+
+## Test Coverage
+
+`npm test` runs with `--coverage`, so the coverage gate is part of **every** test
+invocation — yours and CI's. `npm run test:coverage` is kept as an explicit alias
+for the same thing. The configuration lives in
+[`vite.config.ts`](vite.config.ts) under `test.coverage`, using the `v8`
+provider.
+
+The thresholds are **absolute uncovered counts, not percentages**. A negative
+number is read by Vitest as "at most this many uncovered items":
+
+- `statements: -11` — at most 11 uncovered statements
+- `branches: -8` — at most 8 uncovered branches
+- `lines: -11` — at most 11 uncovered lines
+- `functions: 100` — a positive percentage, so every function must be covered.
+  It cannot be written as `-0`, because `-0 >= 0` is true in JavaScript and the
+  gate would then pass no matter how many functions went uncovered.
+
+Three paths are excluded from measurement: `src/types.ts` (type-only, erased at
+runtime, so there is nothing for v8 to instrument), `src/index.ts` (a barrel of
+re-exports with no logic of its own), and `src/__tests__/**` (test scaffolding,
+not shipped code).
+
+**There is currently zero slack in the gate.** The suite sits at exactly 11
+uncovered statements, exactly 8 uncovered branches, and 31 of 31 functions
+covered. The practical consequence: adding a single uncovered line, or one
+untested function, fails the build. When that happens you have two ways out, and
+either one belongs in the same pull request as the code that caused it — write
+the test that covers the new code, or deliberately adjust the threshold in
+`vite.config.ts` and explain why in the PR description. The tightness is
+intentional. It is a ratchet, meant to stop coverage from drifting down one
+unnoticed line at a time.
 
 ## Submitting Issues
 
@@ -100,9 +133,12 @@ green before review — treat a red check as a change that is not ready, not as 
 technicality.
 
 One thing about that pipeline is worth knowing: **CI runs `npm run lint`, which
-auto-fixes.** Lint problems that ESLint can repair on its own are silently
+auto-fixes.** Lint problems that Biome can repair on its own are silently
 repaired in the CI workspace and never reported, so a green lint check is weaker
-than it looks. Run `npm run lint:report` locally for the read-only verdict.
+than it looks. Run `npm run lint:report` locally for the read-only verdict — and
+read that verdict carefully, because passing is not the same as clean: Biome
+exits 0 on warnings, so `lint:report` can succeed while still printing a long
+list of them.
 
 The type-check script is named `typecheck` for a reason worth knowing before you
 rename it: the shared pipeline probes for that exact name and silently skips the
@@ -113,22 +149,36 @@ workflow — rebase onto `main`.
 
 ## Code Style
 
-**[ESLint](https://eslint.org/)** handles linting and
-**[Prettier](https://prettier.io/)** handles formatting. The configuration lives
-in [`eslint.config.js`](eslint.config.js) and
-[`.prettierrc.json`](.prettierrc.json) and is the single source of truth — run
+**[Biome](https://biomejs.dev/)** does both jobs — linting and formatting — from
+a single toolchain, at the exact pinned version `2.5.8`. The configuration lives
+in [`biome.json`](biome.json) and is the single source of truth — run
 `npm run format` rather than matching the rules by hand.
 
-The essentials:
+The essentials, all of them set explicitly in `biome.json`:
 
 - 2-space indentation, no tabs
 - Single quotes
 - Semicolons always
 - Trailing commas everywhere
-- Prettier defaults for everything else, including its 80-character print width
+- 80-character lines — that is Biome's configured `lineWidth`, not a default
+- LF line endings
+- Arrow parameters always parenthesized, bracket spacing on, and object
+  properties quoted only where the syntax needs it
 
-TypeScript runs in strict mode via `@total-typescript/tsconfig`. `eslint-config-prettier`
-is applied last, so ESLint never fights Prettier over formatting.
+TypeScript runs in strict mode via `@total-typescript/tsconfig`. There is no
+formatter/linter conflict to reconcile and no compatibility shim to keep in the
+right order: Biome's linter and formatter are designed not to fight each other
+over formatting.
+
+On the lint side, Biome's `recommended` rule set is on, with `noConsole` and
+`useBlockStatements` switched off. Two rules are deliberately set to `warn`
+instead of `error` — `noExplicitAny` and `noUnusedVariables` — and since Biome
+exits 0 on warnings, neither fails the build. There are 102 warnings today,
+mostly `noNonNullAssertion` and `noExplicitAny`. Error-level rules do fail the
+build, and one of those is worth calling out because it is genuinely new:
+`noDebugger` is now enforced at error severity, so a stray `debugger` statement
+breaks lint. The old ESLint config only carried a comment reminding someone to
+add that check, which meant it was never actually enforced.
 
 One gotcha catches most first contributions: **relative imports must carry an
 explicit `.ts` extension** (`from './types.ts'`). This is not a style preference

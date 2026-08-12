@@ -231,7 +231,7 @@ function createDependencyGate(
     readySet.add(id);
     const callbacks = depResolvers.get(id);
     if (callbacks) {
-      callbacks.forEach((r) => r());
+      for (const resolve of callbacks) resolve();
       depResolvers.delete(id);
     }
   }
@@ -405,13 +405,22 @@ export async function loadFeatures(
 
   matchedFeatures.sort((a, b) => a.priority - b.priority);
 
-  const { sorted: sortedFeatures, prunedEdges } = topoSort(matchedFeatures, warn);
+  const { sorted: sortedFeatures, prunedEdges } = topoSort(
+    matchedFeatures,
+    warn,
+  );
 
   const matchedIds = new Set(sortedFeatures.map((f) => f.id));
   const knownIds = new Set(features.map((f) => f.id));
   const gate = createDependencyGate(features, matchedIds);
 
-  const { loaded, failedIds } = await loadChunks(sortedFeatures, knownIds, prunedEdges, gate, warn);
+  const { loaded, failedIds } = await loadChunks(
+    sortedFeatures,
+    knownIds,
+    prunedEdges,
+    gate,
+    warn,
+  );
 
   const ctx: ExecutionContext = {
     knownIds,

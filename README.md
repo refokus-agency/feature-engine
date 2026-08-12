@@ -236,7 +236,8 @@ npm run build          # Compile TypeScript
 npm run build:clean    # Clean and rebuild
 npm test               # Run tests
 npm run typecheck      # Type checking
-npm run lint           # Lint and fix
+npm run lint           # Biome lint and autofix
+npm run format         # Biome formatter
 ```
 
 ## Publishing

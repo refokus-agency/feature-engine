@@ -70,7 +70,12 @@ function makeDelayedLoadable(
 }
 
 function formatLog(log: ExecutionEntry[]): string {
-  return log.map((e) => `${e.id}(${(e.end - e.start).toFixed(0)}ms${e.blockedBy ? ` blocked-by:${e.blockedBy}` : ''})`).join(', ');
+  return log
+    .map(
+      (e) =>
+        `${e.id}(${(e.end - e.start).toFixed(0)}ms${e.blockedBy ? ` blocked-by:${e.blockedBy}` : ''})`,
+    )
+    .join(', ');
 }
 
 describe('loadFeatures — smoke tests', () => {
@@ -99,7 +104,10 @@ describe('loadFeatures — smoke tests', () => {
     const elapsed = performance.now() - t0;
 
     const sequentialTime = 9 * 50;
-    expect(log, `only ${log.length}/9 features ran: ${formatLog(log)}`).toHaveLength(9);
+    expect(
+      log,
+      `only ${log.length}/9 features ran: ${formatLog(log)}`,
+    ).toHaveLength(9);
 
     const w1 = log.filter((e) => e.id.startsWith('w1-'));
     const w2 = log.filter((e) => e.id.startsWith('w2-'));
@@ -281,10 +289,19 @@ describe('loadFeatures — smoke tests', () => {
     });
     const elapsed = performance.now() - t0;
 
-    expect(bSetup, 'B should be skipped — dependency A failed').not.toHaveBeenCalled();
-    expect(cSetup, 'C should be skipped — dependency chain A→B failed').not.toHaveBeenCalled();
+    expect(
+      bSetup,
+      'B should be skipped — dependency A failed',
+    ).not.toHaveBeenCalled();
+    expect(
+      cSetup,
+      'C should be skipped — dependency chain A→B failed',
+    ).not.toHaveBeenCalled();
 
-    expect(log.find((e) => e.id === 'D'), 'D (independent) should complete normally').toBeDefined();
+    expect(
+      log.find((e) => e.id === 'D'),
+      'D (independent) should complete normally',
+    ).toBeDefined();
 
     expect(
       elapsed,
@@ -336,11 +353,23 @@ describe('loadFeatures — smoke tests', () => {
     });
     const elapsed = performance.now() - t0;
 
-    expect(unmatchedSetup, 'unmatched DOM feature should not run').not.toHaveBeenCalled();
+    expect(
+      unmatchedSetup,
+      'unmatched DOM feature should not run',
+    ).not.toHaveBeenCalled();
 
-    expect(log.find((e) => e.id === 'dom-matched'), 'matched DOM feature should run').toBeDefined();
-    expect(log.find((e) => e.id === 'global-a'), 'global-a should run').toBeDefined();
-    expect(log.find((e) => e.id === 'global-b'), 'global-b should run').toBeDefined();
+    expect(
+      log.find((e) => e.id === 'dom-matched'),
+      'matched DOM feature should run',
+    ).toBeDefined();
+    expect(
+      log.find((e) => e.id === 'global-a'),
+      'global-a should run',
+    ).toBeDefined();
+    expect(
+      log.find((e) => e.id === 'global-b'),
+      'global-b should run',
+    ).toBeDefined();
 
     expect(
       elapsed,
@@ -358,7 +387,9 @@ describe('loadFeatures — smoke tests', () => {
       const wave = (i % 5) + 1;
       const delayMs = ((i * 7 + 13) % 90) + 10;
       waveMaxes.set(wave, Math.max(waveMaxes.get(wave) ?? 0, delayMs));
-      features.push(makeDelayedLoadable(`f-${i}`, delayMs, log, { priority: wave }));
+      features.push(
+        makeDelayedLoadable(`f-${i}`, delayMs, log, { priority: wave }),
+      );
     }
 
     const parallelBound = [...waveMaxes.values()].reduce((a, b) => a + b, 0);
@@ -367,10 +398,7 @@ describe('loadFeatures — smoke tests', () => {
     await loadFeatures(features, { logging: false });
     const elapsed = performance.now() - t0;
 
-    expect(
-      log,
-      `only ${log.length}/50 features ran`,
-    ).toHaveLength(50);
+    expect(log, `only ${log.length}/50 features ran`).toHaveLength(50);
 
     const upperBound = parallelBound * 3;
     expect(
@@ -390,12 +418,14 @@ describe('loadFeatures — smoke tests', () => {
           id,
           onSetup: () => delay(20),
         });
-        features.push(makeMeta({
-          id,
-          global: true,
-          priority: singleWave ? 1 : i + 1,
-          load: () => Promise.resolve({ default: descriptor }),
-        }));
+        features.push(
+          makeMeta({
+            id,
+            global: true,
+            priority: singleWave ? 1 : i + 1,
+            load: () => Promise.resolve({ default: descriptor }),
+          }),
+        );
       }
       return features;
     };
