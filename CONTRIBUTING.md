@@ -76,21 +76,29 @@ provider.
 The thresholds are **absolute uncovered counts, not percentages**. A negative
 number is read by Vitest as "at most this many uncovered items":
 
-- `statements: -11` — at most 11 uncovered statements
-- `branches: -8` — at most 8 uncovered branches
-- `lines: -11` — at most 11 uncovered lines
+- `statements: -9` — at most 9 uncovered statements
+- `branches: -9` — at most 9 uncovered branches
+- `lines: -4` — at most 4 uncovered lines
 - `functions: 100` — a positive percentage, so every function must be covered.
   It cannot be written as `-0`, because `-0 >= 0` is true in JavaScript and the
   gate would then pass no matter how many functions went uncovered.
+
+These counts are specific to the coverage provider that produced them. Vitest 4
+rewrote how the `v8` provider maps raw coverage back to source, so both the
+totals and the uncovered counts moved when it landed — the numbers above are not
+comparable to the ones the same suite reported under Vitest 3. If a provider or
+major Vitest upgrade shifts them again, recalibrate from a real run rather than
+nudging the numbers by hand.
 
 Three paths are excluded from measurement: `src/types.ts` (type-only, erased at
 runtime, so there is nothing for v8 to instrument), `src/index.ts` (a barrel of
 re-exports with no logic of its own), and `src/__tests__/**` (test scaffolding,
 not shipped code).
 
-**There is currently zero slack in the gate.** The suite sits at exactly 11
-uncovered statements, exactly 8 uncovered branches, and 31 of 31 functions
-covered. The practical consequence: adding a single uncovered line, or one
+**There is currently zero slack in the gate.** The suite sits at exactly 9
+uncovered statements, exactly 9 uncovered branches, exactly 4 uncovered lines,
+and 47 of 47 functions covered. The practical consequence: adding a single
+uncovered line, or one
 untested function, fails the build. When that happens you have two ways out, and
 either one belongs in the same pull request as the code that caused it — write
 the test that covers the new code, or deliberately adjust the threshold in
