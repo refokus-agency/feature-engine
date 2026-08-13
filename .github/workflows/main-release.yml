@@ -30,10 +30,17 @@ jobs:
   # `provenance` stays at the reusable workflow's default (false) until this
   # repository is public; provenance attestation requires a public repo and the
   # publish hard-fails otherwise.
+  #
+  # `packages: write` must stay even though nothing is published to GitHub
+  # Packages anymore. The reusable workflow's `publish` job declares it
+  # unconditionally, and a called workflow may not request a permission the
+  # caller withheld — GitHub fails the run at startup rather than downgrading it.
+  # Dropping it here is what produced the `startup_failure` on run 31714017756.
   release:
     needs: ci
     permissions:
       contents: write
+      packages: write
       issues: write
       pull-requests: write
       id-token: write
