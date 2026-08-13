@@ -19,16 +19,25 @@ jobs:
     permissions:
       contents: read
       packages: read
-    uses: refokus-agency/platform/.github/workflows/ci.yml@v1
+    uses: refokus-agency/platform/.github/workflows/ci.yml@v1.8.1
     secrets: inherit
 
+  # Publishes to the public npm registry via OIDC Trusted Publishing.
+  # `id-token: write` is what lets npm mint the OIDC credential — without it the
+  # exchange fails at runtime, because GitHub never delegates a permission the
+  # caller did not grant. No NPM_TOKEN is involved anywhere.
+  #
+  # `provenance` stays at the reusable workflow's default (false) until this
+  # repository is public; provenance attestation requires a public repo and the
+  # publish hard-fails otherwise.
   release:
     needs: ci
     permissions:
       contents: write
-      packages: write
       issues: write
       pull-requests: write
       id-token: write
-    uses: refokus-agency/platform/.github/workflows/release.yml@v1
+    uses: refokus-agency/platform/.github/workflows/release.yml@v1.8.1
+    with:
+      registry: npm
     secrets: inherit
