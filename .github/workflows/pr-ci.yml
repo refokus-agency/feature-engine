@@ -15,5 +15,5 @@ concurrency:
 
 jobs:
   ci:
-    uses: refokus-agency/platform/.github/workflows/ci.yml@v1
+    uses: refokus-agency/platform/.github/workflows/ci.yml@v1.8.1
     secrets: inherit
