@@ -26,7 +26,7 @@ npm run bench             # Run benchmarks (src/**/*.bench.ts)
 
 Requires Node >= 24 (see `.nvmrc`). The package is ESM-only (`"type": "module"`).
 
-`npm test` carries `--coverage`, so the coverage thresholds in `vite.config.ts` are enforced on every test run, including in CI. They are **absolute uncovered counts, not percentages** (`statements: -11`, `branches: -8`, `lines: -11`, `functions: 100`), and there is currently no slack in any of them — adding an uncovered line or an untested function fails the run. See the Test Coverage section of [CONTRIBUTING.md](CONTRIBUTING.md) for the full rules.
+`npm test` carries `--coverage`, so the coverage thresholds in `vite.config.ts` are enforced on every test run, including in CI. They are **absolute uncovered counts, not percentages** (`statements: -9`, `branches: -9`, `lines: -4`, `functions: 100`), and there is currently no slack in any of them — adding an uncovered line or an untested function fails the run. The counts are provider-specific: Vitest 4 changed how the `v8` provider maps coverage back to source, so recalibrate from a real run after a provider or major Vitest upgrade instead of adjusting them by hand. See the Test Coverage section of [CONTRIBUTING.md](CONTRIBUTING.md) for the full rules.
 
 ## Architecture
 

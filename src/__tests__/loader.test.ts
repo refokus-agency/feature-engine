@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
+import type { MockInstance } from 'vitest';
 import { loadFeatures } from '../loader.ts';
 import { defineFeature } from '../define-feature.ts';
 import type {
@@ -253,7 +254,7 @@ describe('loadFeatures', () => {
   });
 
   describe('dependency ordering (topological sort)', () => {
-    let warnSpy: ReturnType<typeof vi.spyOn>;
+    let warnSpy: MockInstance<typeof console.warn>;
     beforeEach(() => {
       warnSpy = vi.spyOn(console, 'warn').mockImplementation(noop);
     });
@@ -368,7 +369,7 @@ describe('loadFeatures', () => {
   });
 
   describe('timeout', () => {
-    let warnSpy: ReturnType<typeof vi.spyOn>;
+    let warnSpy: MockInstance<typeof console.warn>;
     beforeEach(() => {
       warnSpy = vi.spyOn(console, 'warn').mockImplementation(noop);
     });
@@ -501,7 +502,7 @@ describe('loadFeatures', () => {
   });
 
   describe('chunk load failure', () => {
-    let warnSpy: ReturnType<typeof vi.spyOn>;
+    let warnSpy: MockInstance<typeof console.warn>;
     beforeEach(() => {
       warnSpy = vi.spyOn(console, 'warn').mockImplementation(noop);
     });
@@ -949,7 +950,7 @@ describe('loadFeatures', () => {
   });
 
   describe('wave-based concurrent dispatch', () => {
-    let warnSpy: ReturnType<typeof vi.spyOn>;
+    let warnSpy: MockInstance<typeof console.warn>;
     beforeEach(() => {
       warnSpy = vi.spyOn(console, 'warn').mockImplementation(noop);
     });
@@ -1477,7 +1478,7 @@ describe('loadFeatures', () => {
 });
 
 describe('loadFeatures — expose + deps (#36)', () => {
-  let warnSpy: ReturnType<typeof vi.spyOn>;
+  let warnSpy: MockInstance<typeof console.warn>;
 
   beforeEach(() => {
     document.body.innerHTML = '';
@@ -1963,7 +1964,7 @@ describe('loadFeatures — expose + deps (#36)', () => {
 // (which builds descriptors directly), these prove the freeze pass-through carries `expose` through
 // defineFeature into the loader.
 describe('loadFeatures — expose + deps integration (#38)', () => {
-  let warnSpy: ReturnType<typeof vi.spyOn>;
+  let warnSpy: MockInstance<typeof console.warn>;
 
   beforeEach(() => {
     document.body.innerHTML = '';
