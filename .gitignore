@@ -61,3 +61,7 @@ datasources/
 
 .atl
 .cothinker
+
+# Internal implementation plans written by the planning tooling. They are
+# working notes, not project documentation, and are not published.
+docs/specs/

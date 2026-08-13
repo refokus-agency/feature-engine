@@ -37,8 +37,9 @@ const REQUIRED_GITHUB_TEMPLATES = [
 const REQUIRED_GITHUB_CONFIG = ['.github/dependabot.yml'] as const;
 
 /**
- * The `cooldown` floor on the npm ecosystem block, mirroring `min-release-age=3`
- * in `.npmrc`. Stated once here so the assertion below has a single source.
+ * The `cooldown` floor on the npm ecosystem block. Stated once here so the
+ * assertion below has a single source. The matching install-time floor is
+ * tracked in #72.
  */
 const DEPENDABOT_COOLDOWN_DAYS = 3;
 

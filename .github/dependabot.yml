@@ -7,10 +7,11 @@ updates:
       day: "monday"
       time: "09:00"
     open-pull-requests-limit: 5
-    # Mirrors `min-release-age=3` in .npmrc: nothing younger than three days
-    # enters the lockfile. GitHub currently applies a 3-day default on its own,
-    # so this is a no-op today — it is written explicitly so the policy survives
-    # GitHub changing that default. Do not "clean it up".
+    # A three-day floor: nothing younger than that enters the lockfile. GitHub
+    # currently applies a 3-day default on its own, so this is a no-op today —
+    # it is written explicitly so the policy survives GitHub changing that
+    # default. Do not "clean it up". The matching install-time floor is tracked
+    # in #72.
     # Security updates ignore cooldown by design: a known vulnerability ships
     # day 0.
     cooldown:
