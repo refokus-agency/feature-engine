@@ -6,17 +6,23 @@
 
 Declarative feature loading system with code splitting for Webflow projects. Define features as isolated modules, let the engine handle DOM matching, dependency resolution, and lifecycle execution.
 
+## Why feature-engine?
+
+Webflow lets you paste JavaScript straight into a site's or a page's custom code. That is fine for a handful of lines, but it gives you no build step — no npm packages, no TypeScript, no bundling — and the same snippet spread across twenty pages has no single source of truth, so it drifts. Anything beyond a handful of lines therefore moves into an external build, loaded site-wide as one bundle. That works, but every page then pays for every feature: a page with nothing but an accordion still downloads the video player, the scroll animations, and the cart logic.
+
+The single bundle is the default for a good reason. Webflow components get copied between pages, and a copied component brings its markup and its `data-` attributes with it — but not its JavaScript. It only behaves correctly if the code that drives it is already loaded on the page it landed on. Shipping one bundle everywhere is the cheapest way to guarantee that.
+
+feature-engine keeps the guarantee and drops the payload. Each feature declares the selectors it needs, and the loader reads the DOM of the page it is actually on, lazy-importing only the chunks whose selectors are present — features that have to run everywhere opt out of matching by declaring themselves `global`. There is no per-page or per-route configuration to maintain: copying a component to another page is enough, and its feature follows it.
+
+It is built for Webflow developers who already have a Vite build in place. On a one-page site, a single bundle is fine — the benefit starts at two pages and grows with every feature that only some of them use.
+
 ## Installation
 
 ```bash
 npm install @refokus-agency/feature-engine
 ```
 
-> Published to GitHub Packages under `@refokus-agency`. Configure your `.npmrc`:
->
-> ```
-> @refokus-agency:registry=https://npm.pkg.github.com
-> ```
+Requires Node >= 24. The package is ESM-only; there is no CommonJS build.
 
 ## Quick start
 
@@ -78,6 +84,47 @@ loadFeatures(features, { timeout: 8000 });
 ```
 
 That's it. The loader matches features against the current DOM, resolves dependencies via topological sort, and runs each feature's lifecycle with code splitting.
+
+## Webflow integration
+
+Webflow does not build your JavaScript, so the bundle is built outside Webflow, hosted somewhere public, and referenced from the site.
+
+### 1. Build the bundle
+
+`vite build` emits the entry script plus a chunk per feature, alongside any shared chunks Rollup splits out of them. Two settings matter here:
+
+- **`base`** — the public URL the build will be served from. Chunk URLs are resolved against it; left at the default, the browser requests chunks from your Webflow domain, where they do not exist.
+- **`entryFileNames`** — Vite hashes output filenames by default (`assets/main-a1b2c3.js`). You paste the entry URL into Webflow by hand, so pin that one filename. The feature chunks keep their hashes, which is what you want for cache busting.
+
+```ts
+// vite.config.ts
+import { defineConfig } from 'vite';
+import { featureMetadataPlugin } from '@refokus-agency/feature-engine/vite';
+
+export default defineConfig({
+  base: 'https://assets.example.com/webflow/',
+  plugins: [featureMetadataPlugin()],
+  build: {
+    rollupOptions: {
+      output: { entryFileNames: 'main.js' },
+    },
+  },
+});
+```
+
+### 2. Host the output
+
+Hosting the built files is your own responsibility — Webflow only serves the site it builds for you. Upload the whole build output and keep its directory structure, since chunk URLs are resolved relative to `base`. Whatever you host it on must send `Access-Control-Allow-Origin` for the entry script **and** for every chunk. Chunks are fetched as separate cross-origin module requests, so a header on the entry script alone leaves every lazy import blocked.
+
+### 3. Reference the entry script from Webflow
+
+Add it to the site's custom code — **Site settings → Custom code**, in either the head or the footer field — or to a single page under **Page settings → Custom code**:
+
+```html
+<script type="module" src="https://assets.example.com/webflow/main.js"></script>
+```
+
+`type="module"` is required: the package is ESM-only and the loader pulls feature chunks in with dynamic `import()`. Module scripts are deferred, so either field works — the script runs after the page has been parsed, which is what the loader needs to match features against the DOM.
 
 ## API
 
@@ -248,7 +295,7 @@ This package uses [semantic-release](https://semantic-release.gitbook.io/) for a
 npm run commit         # Commitizen wizard
 ```
 
-Published to GitHub Packages on push to `main`.
+Published to the public npm registry on push to `main`.
 
 ## Contributing
 
