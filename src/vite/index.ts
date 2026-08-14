@@ -1,6 +1,7 @@
 import { readFileSync, globSync } from 'node:fs';
 import { resolve } from 'node:path';
 import type { Plugin } from 'vite';
+import { serializeForCodeContext } from './escape-js.ts';
 import { parseFeatureFile } from './parse-feature-file.ts';
 import type { ParsedFeatureMeta } from './parse-feature-file.ts';
 
@@ -28,7 +29,8 @@ function findFeatureFiles(srcDir: string, include?: string): string[] {
 }
 
 function buildEntry(meta: ParsedFeatureMeta, filePath: string): string {
-  return `  { id: ${JSON.stringify(meta.id)}, selectors: ${JSON.stringify(meta.selectors)}, priority: ${JSON.stringify(meta.priority)}, global: ${JSON.stringify(meta.global)}, dependencies: ${JSON.stringify(meta.dependencies)}, timeout: ${JSON.stringify(meta.timeout)}, load: () => import(${JSON.stringify(filePath)}) }`;
+  const s = serializeForCodeContext;
+  return `  { id: ${s(meta.id)}, selectors: ${s(meta.selectors)}, priority: ${s(meta.priority)}, global: ${s(meta.global)}, dependencies: ${s(meta.dependencies)}, timeout: ${s(meta.timeout)}, load: () => import(${s(filePath)}) }`;
 }
 
 export function featureMetadataPlugin(
