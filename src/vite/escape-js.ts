@@ -14,18 +14,12 @@ export type SerializableMetaValue =
  *
  * `/` is deliberately absent — it cannot terminate a script element on its own,
  * and escaping it would change the emitted text of every discovered file path.
+ *
+ * BMP only. The pattern carries no `u` flag, so an astral character matches as
+ * two surrogate halves that are escaped separately and reassemble correctly.
+ * Adding `u` would make each pair match as a single unit and drop its low half.
  */
-const UNSAFE_CHARS = {
-  '<': '\\u003C',
-  '>': '\\u003E',
-  '\u2028': '\\u2028',
-  '\u2029': '\\u2029',
-} as const;
-
-/** Character class must stay in sync with the keys of `UNSAFE_CHARS`. */
 const UNSAFE_PATTERN = /[<>\u2028\u2029]/g;
-
-type UnsafeChar = keyof typeof UNSAFE_CHARS;
 
 /**
  * Serialize a metadata value into a JavaScript source literal that cannot
@@ -39,7 +33,14 @@ type UnsafeChar = keyof typeof UNSAFE_CHARS;
 export function serializeForCodeContext(value: SerializableMetaValue): string {
   return JSON.stringify(value).replace(
     UNSAFE_PATTERN,
-    // Safe cast: the pattern only ever matches keys of UNSAFE_CHARS.
-    (char) => UNSAFE_CHARS[char as UnsafeChar],
+    // The escape is derived from the character itself, so there is no table to
+    // fall out of sync with the pattern. `toUpperCase` is load-bearing — the
+    // emitted text must stay byte-identical to the previous output.
+    //   '<'    -> 60   -> '3c'   -> '3C'   -> '003C'
+    //   '>'    -> 62   -> '3e'   -> '3E'   -> '003E'
+    //   U+2028 -> 8232 -> '2028' -> '2028' -> '2028'
+    //   U+2029 -> 8233 -> '2029' -> '2029' -> '2029'
+    (char) =>
+      `\\u${char.charCodeAt(0).toString(16).toUpperCase().padStart(4, '0')}`,
   );
 }
