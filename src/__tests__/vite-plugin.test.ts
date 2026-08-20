@@ -4,6 +4,7 @@ import { resolve } from 'node:path';
 import { tmpdir } from 'node:os';
 import { parseFeatureFile } from '../vite/parse-feature-file.ts';
 import { featureMetadataPlugin } from '../vite/index.ts';
+import type { ParsedFeatureMeta } from '../vite/index.ts';
 
 beforeEach(() => {
   vi.restoreAllMocks();
@@ -547,6 +548,22 @@ describe('featureMetadataPlugin', () => {
       return root;
     }
 
+    /**
+     * Evaluates a generated `virtual:feature-metadata` module the way the
+     * bundler would, so tests can assert the runtime values the emitted text
+     * parses to — not just the text itself. The `load` arrow is dropped: its
+     * `import()` specifier points at a temp fixture that is never resolved.
+     */
+    function evaluateVirtualModule(
+      source: string,
+    ): Omit<ParsedFeatureMeta, 'enabled'>[] {
+      const arrayLiteral = source
+        .replace(/^export default /, '')
+        .replace(/, load: \(\) => import\([^)]*\)/g, '')
+        .replace(/;\n$/, '');
+      return new Function(`return (${arrayLiteral});`)();
+    }
+
     afterAll(() => {
       try {
         rmSync(TMP_ROOT, { recursive: true, force: true });
@@ -729,5 +746,97 @@ describe('featureMetadataPlugin', () => {
       expect(result).toContain('timeout: null');
       expect(result).toContain('dependencies: []');
     });
+
+    it('escapes < and > coming from a feature id and selectors', () => {
+      const root = setupFixture('hostile-content', {
+        'hostile.feature.js': featureSource(`
+          id: "</script><script>alert(1)</script>",
+          selectors: ["[data-x=\\"</script>\\"]"],
+          priority: 1,
+          dependencies: ["</script>"],
+          onSetup() {}
+        `),
+      });
+
+      const plugin = featureMetadataPlugin();
+      (plugin.configResolved as (...args: any[]) => any).call({}, { root });
+      const result = (plugin.load as (...args: any[]) => any).call(
+        {},
+        '\0virtual:feature-metadata',
+      ) as string;
+
+      expect(result).toContain('\\u003C/script\\u003E');
+      expect(result).not.toContain('<');
+      // The only `>` the generator emits itself is the `=>` of the load arrow.
+      expect(result.replace(/=>/g, '')).not.toContain('>');
+
+      const entry = evaluateVirtualModule(result)[0]!;
+      expect(entry.id).toBe('</script><script>alert(1)</script>');
+      expect(entry.selectors).toEqual(['[data-x="</script>"]']);
+      expect(entry.dependencies).toEqual(['</script>']);
+    });
+
+    it('preserves the runtime value of a child-combinator selector', () => {
+      const root = setupFixture('child-combinator', {
+        'combinator.feature.js': featureSource(`
+          id: "combinator",
+          selectors: [".a > .b"],
+          priority: 1,
+          onSetup() {}
+        `),
+      });
+
+      const plugin = featureMetadataPlugin();
+      (plugin.configResolved as (...args: any[]) => any).call({}, { root });
+      const result = (plugin.load as (...args: any[]) => any).call(
+        {},
+        '\0virtual:feature-metadata',
+      ) as string;
+
+      expect(result).toContain('\\u003E');
+
+      const entry = evaluateVirtualModule(result)[0]!;
+      expect(entry.selectors).toEqual(['.a > .b']);
+    });
+
+    /**
+     * Covers the sink CodeQL flagged: the `import()` specifier built from a
+     * discovered path rather than from feature-declared metadata. `<` and `>`
+     * are legal in POSIX filenames, so the fixture is only skipped on Windows,
+     * where the characters cannot appear in a filename at all.
+     */
+    it.skipIf(process.platform === 'win32')(
+      'escapes < and > coming from a discovered file path',
+      () => {
+        const fileName = 'we<ird>.feature.js';
+        const root = setupFixture('hostile-path', {
+          [fileName]: featureSource(`
+            id: "hostile-path",
+            selectors: ["[data-hostile-path]"],
+            priority: 1,
+            onSetup() {}
+          `),
+        });
+
+        const plugin = featureMetadataPlugin();
+        (plugin.configResolved as (...args: any[]) => any).call({}, { root });
+        const result = (plugin.load as (...args: any[]) => any).call(
+          {},
+          '\0virtual:feature-metadata',
+        ) as string;
+
+        const specifier = /import\((.+?)\)/.exec(result)?.[1];
+        expect(specifier).toBeDefined();
+        expect(specifier).toContain('\\u003C');
+        expect(specifier).toContain('\\u003E');
+        expect(specifier).not.toContain('<');
+        expect(specifier).not.toContain('>');
+
+        // Escaping must not change which module the specifier resolves to.
+        expect(new Function(`return (${specifier!});`)()).toBe(
+          resolve(root, 'src', 'features', fileName),
+        );
+      },
+    );
   });
 });
