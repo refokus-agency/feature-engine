@@ -27,9 +27,10 @@ jobs:
   # exchange fails at runtime, because GitHub never delegates a permission the
   # caller did not grant. No NPM_TOKEN is involved anywhere.
   #
-  # `provenance` stays at the reusable workflow's default (false) until this
-  # repository is public; provenance attestation requires a public repo and the
-  # publish hard-fails otherwise.
+  # `provenance: true` makes npm attach a signed build attestation to the
+  # tarball, which is what earns the "Built and signed on GitHub Actions" badge
+  # on npmjs.com. It requires a PUBLIC repository — the publish hard-fails
+  # otherwise — so it could only be turned on after the visibility flip (#60).
   #
   # `packages: write` must stay even though nothing is published to GitHub
   # Packages anymore. The reusable workflow's `publish` job declares it
@@ -47,4 +48,5 @@ jobs:
     uses: refokus-agency/platform/.github/workflows/release.yml@v1.8.1
     with:
       registry: npm
+      provenance: true
     secrets: inherit
