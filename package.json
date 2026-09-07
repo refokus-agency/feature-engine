@@ -73,7 +73,7 @@
     "@total-typescript/tsconfig": "^1.0.4",
     "@types/node": "^26.2.0",
     "@types/webidl-conversions": "^7.0.3",
-    "@vitest/coverage-v8": "^4.1.10",
+    "@vitest/coverage-v8": "^5.0.0",
     "@vitest/ui": "^4.1.10",
     "commitizen": "^4.3.2",
     "cz-conventional-changelog": "3.3.0",
