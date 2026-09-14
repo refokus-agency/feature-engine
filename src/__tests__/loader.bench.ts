@@ -1,4 +1,4 @@
-import { bench, describe } from 'vitest';
+import { test } from 'vitest';
 import { loadFeatures } from '../loader.ts';
 import type { FeatureDescriptor, FeatureMeta } from '../types.ts';
 
@@ -109,48 +109,38 @@ function buildWithDeps(opts: {
 
 const opts = { logging: false };
 
-describe('loadFeatures — parallel vs sequential', () => {
-  bench(
-    'parallel: 10 features x 20ms, 1 wave',
-    async () => {
+// Vitest 5 moved `bench` off the module exports and onto the test context:
+// benchmarks are registered inside a regular test and executed together by
+// `bench.compare`. Per-benchmark `iterations`/`warmupIterations` became
+// run-level options, so they are passed once as the trailing argument.
+const RUN_OPTIONS = { iterations: 5, warmupIterations: 1 };
+
+test('loadFeatures — wave scheduling', async ({ bench }) => {
+  await bench.compare(
+    bench('parallel: 10 features x 20ms, 1 wave', async () => {
       await loadFeatures(
         buildFeatures({ count: 10, waves: 1, delayMs: 20 }),
         opts,
       );
-    },
-    { iterations: 5, warmupIterations: 1 },
-  );
-
-  bench(
-    'sequential: 10 features x 20ms, 10 waves',
-    async () => {
+    }),
+    bench('sequential: 10 features x 20ms, 10 waves', async () => {
       await loadFeatures(
         buildSequentialFeatures({ count: 10, delayMs: 20 }),
         opts,
       );
-    },
-    { iterations: 5, warmupIterations: 1 },
-  );
-
-  bench(
-    'parallel: 50 features x 10ms, 5 waves',
-    async () => {
+    }),
+    bench('parallel: 50 features x 10ms, 5 waves', async () => {
       await loadFeatures(
         buildFeatures({ count: 50, waves: 5, delayMs: 10 }),
         opts,
       );
-    },
-    { iterations: 5, warmupIterations: 1 },
-  );
-
-  bench(
-    'parallel with deps: 10/wave x 3 waves x 15ms',
-    async () => {
+    }),
+    bench('parallel with deps: 10/wave x 3 waves x 15ms', async () => {
       await loadFeatures(
         buildWithDeps({ perWave: 10, waves: 3, delayMs: 15 }),
         opts,
       );
-    },
-    { iterations: 5, warmupIterations: 1 },
+    }),
+    RUN_OPTIONS,
   );
 });
