@@ -30,8 +30,8 @@
 #    ambient `github.token`. Reading `contents: read` here as the job's real
 #    write ceiling is a mistake.
 #
-# 3. `uses:` is pinned to the exact tag @v1.10.2 (commit
-#    afb47de8f546213d30186e12e540b466b28b9a68), never a floating @v1. When
+# 3. `uses:` is pinned to the exact tag @v1.10.3 (commit
+#    a8da1da7adc68709d91bfe26fbe5afd9d35a9f8e), never a floating @v1. When
 #    Dependabot bumps this ref, re-read the reusable's `workflow_call` block
 #    before merging: a renamed or newly-required secret surfaces as a
 #    workflow-call error here, and a dropped one as a silent no-op.
@@ -60,6 +60,6 @@ concurrency:
 
 jobs:
   review:
-    uses: refokus-agency/platform/.github/workflows/code-review.yml@v1.10.2
+    uses: refokus-agency/platform/.github/workflows/code-review.yml@v1.10.3
     secrets:
       ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
