@@ -1,0 +1,65 @@
+# Claude code review, on demand. Comment `@claude review` on a pull request and
+# the reusable posts a review. There is no automatic trigger — the reusable only
+# exposes `workflow_call` and gates on `issue_comment`, by design.
+#
+# Three deliberate deviations from the sibling callers (pr-ci.yml, main-release.yml),
+# which both inherit the full secret set:
+#
+# 1. `secrets:` maps ANTHROPIC_API_KEY explicitly rather than blanket-inheriting.
+#    Do NOT "fix" this back to an inherited secret set for consistency. This job
+#    is fired by a comment, so any org member who can comment can start it.
+#    Inheriting would hand it every secret this repository can see — including
+#    the release GitHub App credentials (RELEASE_APP_ID, RELEASE_APP_PRIVATE_KEY)
+#    — to a run whose payload is attacker-influenced text. The reusable declares
+#    both of its secrets `required: false`, so mapping only the one it needs is
+#    valid; an unmapped credential makes the job skip green, not fail.
+#
+# 2. `id-token: write` is load-bearing on EVERY run. Do not remove it because it
+#    looks unused — nothing in this file references an OIDC token, but the review
+#    cannot post without one. The reusable's "Code review" step passes no
+#    `github_token:` to claude-code-action, so the action mints an OIDC token and
+#    exchanges it for a GitHub App installation token; that App token, not
+#    `github.token`, is what posts the review. Without this permission the step
+#    hard-fails on "Could not fetch an OIDC token" — it does not skip green.
+#    (Verified in claude-code-action@v1: src/github/token.ts setupGitHubToken().)
+#
+#    Consequence worth knowing: that App token carries `contents: write`,
+#    `pull_requests: write` and `issues: write` from the action's own defaults.
+#    Its ceiling is set by the Claude GitHub App's installation on this
+#    repository, NOT by the `permissions:` block below — which bounds only the
+#    ambient `github.token`. Reading `contents: read` here as the job's real
+#    write ceiling is a mistake.
+#
+# 3. `uses:` is pinned to the exact tag @v1.10.2 (commit
+#    afb47de8f546213d30186e12e540b466b28b9a68), never a floating @v1. When
+#    Dependabot bumps this ref, re-read the reusable's `workflow_call` block
+#    before merging: a renamed or newly-required secret surfaces as a
+#    workflow-call error here, and a dropped one as a silent no-op.
+
+name: Comment Code Review
+
+on:
+  issue_comment:
+    types: [created]
+
+# Required by the reusable, which declares no permissions of its own and inherits
+# these. A called workflow may not request a scope the caller withheld.
+permissions:
+  contents: read
+  pull-requests: write
+  issues: write
+  id-token: write
+
+# Keyed on `issue.number`, not `pull_request.number` — this is an `issue_comment`
+# event, where the pull request arrives as `event.issue` and
+# `event.pull_request` is null. `cancel-in-progress: false` so a second
+# `@claude review` queues behind an in-flight review instead of killing it.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.issue.number }}
+  cancel-in-progress: false
+
+jobs:
+  review:
+    uses: refokus-agency/platform/.github/workflows/code-review.yml@v1.10.2
+    secrets:
+      ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
