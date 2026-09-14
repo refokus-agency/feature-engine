@@ -19,7 +19,7 @@ jobs:
     permissions:
       contents: read
       packages: read
-    uses: refokus-agency/platform/.github/workflows/ci.yml@v1.8.1
+    uses: refokus-agency/platform/.github/workflows/ci.yml@v1.10.2
     secrets: inherit
 
   # Publishes to the public npm registry via OIDC Trusted Publishing.
@@ -45,7 +45,7 @@ jobs:
       issues: write
       pull-requests: write
       id-token: write
-    uses: refokus-agency/platform/.github/workflows/release.yml@v1.8.1
+    uses: refokus-agency/platform/.github/workflows/release.yml@v1.10.2
     with:
       registry: npm
       provenance: true
