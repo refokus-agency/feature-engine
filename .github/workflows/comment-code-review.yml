@@ -2,7 +2,7 @@
 # the reusable posts a review. There is no automatic trigger — the reusable only
 # exposes `workflow_call` and gates on `issue_comment`, by design.
 #
-# Three deliberate deviations from the sibling callers (pr-ci.yml, main-release.yml),
+# Four deliberate deviations from the sibling callers (pr-ci.yml, main-release.yml),
 # which both inherit the full secret set:
 #
 # 1. `secrets:` maps ANTHROPIC_API_KEY explicitly rather than blanket-inheriting.
@@ -35,6 +35,19 @@
 #    Dependabot bumps this ref, re-read the reusable's `workflow_call` block
 #    before merging: a renamed or newly-required secret surfaces as a
 #    workflow-call error here, and a dropped one as a silent no-op.
+#
+# 4. `with: platform-ref:` pins the guard script to the SAME tag as `uses:` above.
+#    The reusable's "Verify review outcome" step checks out refokus-agency/platform
+#    and EXECUTES `.github/scripts/review-guard.sh` out of that checkout. The input
+#    defaults to `main` — a moving ref — so leaving it alone means this job runs a
+#    script that can change with no pull request here, and lets the guard drift
+#    away from the v1.10.3 reusable it is guarding.
+#
+#    Dependabot does NOT keep the two in sync. Its `github-actions` updater
+#    rewrites `uses:` refs only; `platform-ref` is an opaque input string it never
+#    parses. So when a bump PR moves `uses:` to a newer tag, move this value BY
+#    HAND in the same pull request. A mismatch between them is silent — nothing
+#    fails, the guard just stops matching the workflow it checks.
 
 name: Comment Code Review
 
@@ -61,5 +74,9 @@ concurrency:
 jobs:
   review:
     uses: refokus-agency/platform/.github/workflows/code-review.yml@v1.10.3
+    with:
+      # Keep in lockstep with the tag above — see header note 4. Dependabot will
+      # not do this for you, and a drift between the two is silent.
+      platform-ref: v1.10.3
     secrets:
       ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
