@@ -1,53 +1,6 @@
-# Claude code review, on demand. Comment `@claude review` on a pull request and
-# the reusable posts a review. There is no automatic trigger — the reusable only
-# exposes `workflow_call` and gates on `issue_comment`, by design.
-#
-# Four deliberate deviations from the sibling callers (pr-ci.yml, main-release.yml),
-# which both inherit the full secret set:
-#
-# 1. `secrets:` maps ANTHROPIC_API_KEY explicitly rather than blanket-inheriting.
-#    Do NOT "fix" this back to an inherited secret set for consistency. This job
-#    is fired by a comment, so any org member who can comment can start it.
-#    Inheriting would hand it every secret this repository can see — including
-#    the release GitHub App credentials (RELEASE_APP_ID, RELEASE_APP_PRIVATE_KEY)
-#    — to a run whose payload is attacker-influenced text. The reusable declares
-#    both of its secrets `required: false`, so mapping only the one it needs is
-#    valid; an unmapped credential makes the job skip green, not fail.
-#
-# 2. `id-token: write` is load-bearing on EVERY run. Do not remove it because it
-#    looks unused — nothing in this file references an OIDC token, but the review
-#    cannot post without one. The reusable's "Code review" step passes no
-#    `github_token:` to claude-code-action, so the action mints an OIDC token and
-#    exchanges it for a GitHub App installation token; that App token, not
-#    `github.token`, is what posts the review. Without this permission the step
-#    hard-fails on "Could not fetch an OIDC token" — it does not skip green.
-#    (Verified in claude-code-action@v1: src/github/token.ts setupGitHubToken().)
-#
-#    Consequence worth knowing: that App token carries `contents: write`,
-#    `pull_requests: write` and `issues: write` from the action's own defaults.
-#    Its ceiling is set by the Claude GitHub App's installation on this
-#    repository, NOT by the `permissions:` block below — which bounds only the
-#    ambient `github.token`. Reading `contents: read` here as the job's real
-#    write ceiling is a mistake.
-#
-# 3. `uses:` is pinned to the exact tag @v1.10.3 (commit
-#    a8da1da7adc68709d91bfe26fbe5afd9d35a9f8e), never a floating @v1. When
-#    Dependabot bumps this ref, re-read the reusable's `workflow_call` block
-#    before merging: a renamed or newly-required secret surfaces as a
-#    workflow-call error here, and a dropped one as a silent no-op.
-#
-# 4. `with: platform-ref:` pins the guard script to the SAME tag as `uses:` above.
-#    The reusable's "Verify review outcome" step checks out refokus-agency/platform
-#    and EXECUTES `.github/scripts/review-guard.sh` out of that checkout. The input
-#    defaults to `main` — a moving ref — so leaving it alone means this job runs a
-#    script that can change with no pull request here, and lets the guard drift
-#    away from the v1.10.3 reusable it is guarding.
-#
-#    Dependabot does NOT keep the two in sync. Its `github-actions` updater
-#    rewrites `uses:` refs only; `platform-ref` is an opaque input string it never
-#    parses. So when a bump PR moves `uses:` to a newer tag, move this value BY
-#    HAND in the same pull request. A mismatch between them is silent — nothing
-#    fails, the guard just stops matching the workflow it checks.
+# Claude code review on demand: comment `@claude review` on a pull request.
+# Rationale for the non-obvious bits below lives in the PR that added this file
+# (refokus-agency/feature-engine#111) and in platform's docs/architecture.md.
 
 name: Comment Code Review
 
@@ -55,28 +8,26 @@ on:
   issue_comment:
     types: [created]
 
-# Required by the reusable, which declares no permissions of its own and inherits
-# these. A called workflow may not request a scope the caller withheld.
+# `id-token: write` is NOT inert. The reusable mints an OIDC token and trades it for
+# the GitHub App token that actually posts the review; without it every run hard-fails.
 permissions:
   contents: read
   pull-requests: write
   issues: write
   id-token: write
 
-# Keyed on `issue.number`, not `pull_request.number` — this is an `issue_comment`
-# event, where the pull request arrives as `event.issue` and
-# `event.pull_request` is null. `cancel-in-progress: false` so a second
-# `@claude review` queues behind an in-flight review instead of killing it.
-concurrency:
-  group: ${{ github.workflow }}-${{ github.event.issue.number }}
-  cancel-in-progress: false
+# No `concurrency:` here on purpose — the reusable owns serialization as of v1.11.0.
+# A caller-side group cannot read its inputs, so it swallows every issue_comment in the
+# repo and cancels queued reviews. Do not add one back.
 
 jobs:
   review:
-    uses: refokus-agency/platform/.github/workflows/code-review.yml@v1.10.3
+    uses: refokus-agency/platform/.github/workflows/code-review.yml@v1.11.0
     with:
-      # Keep in lockstep with the tag above — see header note 4. Dependabot will
-      # not do this for you, and a drift between the two is silent.
-      platform-ref: v1.10.3
+      # Keep in lockstep with the tag above. Dependabot rewrites `uses:` only, and a
+      # mismatch fails silently.
+      platform-ref: v1.11.0
+    # Explicit, never `secrets: inherit`: anyone who can comment can start this job, and
+    # inheriting would hand it the release App credentials.
     secrets:
       ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
