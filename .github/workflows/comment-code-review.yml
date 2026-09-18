@@ -1,0 +1,33 @@
+# Claude code review on demand: comment `@claude review` on a pull request.
+# Rationale for the non-obvious bits below lives in the PR that added this file
+# (refokus-agency/feature-engine#111) and in platform's docs/architecture.md.
+
+name: Comment Code Review
+
+on:
+  issue_comment:
+    types: [created]
+
+# `id-token: write` is NOT inert. The reusable mints an OIDC token and trades it for
+# the GitHub App token that actually posts the review; without it every run hard-fails.
+permissions:
+  contents: read
+  pull-requests: write
+  issues: write
+  id-token: write
+
+# No `concurrency:` here on purpose — the reusable owns serialization as of v1.11.0.
+# A caller-side group cannot read its inputs, so it swallows every issue_comment in the
+# repo and cancels queued reviews. Do not add one back.
+
+jobs:
+  review:
+    uses: refokus-agency/platform/.github/workflows/code-review.yml@v1.11.0
+    with:
+      # Keep in lockstep with the tag above. Dependabot rewrites `uses:` only, and a
+      # mismatch fails silently.
+      platform-ref: v1.11.0
+    # Explicit, never `secrets: inherit`: anyone who can comment can start this job, and
+    # inheriting would hand it the release App credentials.
+    secrets:
+      ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
