@@ -45,7 +45,7 @@ jobs:
       issues: write
       pull-requests: write
       id-token: write
-    uses: refokus-agency/platform/.github/workflows/release.yml@v1.10.2
+    uses: refokus-agency/platform/.github/workflows/release.yml@v1.11.0
     with:
       registry: npm
       provenance: true
