@@ -26,7 +26,7 @@ jobs:
     with:
       # Keep in lockstep with the tag above. Dependabot rewrites `uses:` only, and a
       # mismatch fails silently.
-      platform-ref: v1.11.0
+      platform-ref: v1.12.0
     # Explicit, never `secrets: inherit`: anyone who can comment can start this job, and
     # inheriting would hand it the release App credentials.
     secrets:
