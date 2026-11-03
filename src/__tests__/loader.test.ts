@@ -2259,3 +2259,191 @@ describe('loadFeatures — expose + deps integration (#38)', () => {
     expect(order).toEqual(['setup', 'each:1', 'each:1', 'ready']);
   });
 });
+
+describe('loadFeatures — root option (#135)', () => {
+  beforeEach(() => {
+    document.body.innerHTML = '';
+    vi.restoreAllMocks();
+  });
+
+  it('AC-1: passes document as the root when the root option is omitted', async () => {
+    document.body.innerHTML = '<div data-a></div>';
+    let seenRoot: unknown;
+    const features = [
+      makeLoadable('a', {
+        selectors: ['[data-a]'],
+        onSetup: (_selectors, { root }) => {
+          seenRoot = root;
+        },
+      }),
+    ];
+
+    await loadFeatures(features);
+
+    expect(seenRoot).toBe(document);
+  });
+
+  it('AC-2: matches a non-global feature only when a selector matches a descendant of root', async () => {
+    document.body.innerHTML =
+      '<div id="container"><div data-in></div></div><div data-out></div>';
+    const root = document.getElementById('container')!;
+    const inSetup = vi.fn();
+    const outSetup = vi.fn();
+    const features = [
+      makeLoadable('in', { selectors: ['[data-in]'], onSetup: inSetup }),
+      makeLoadable('out', { selectors: ['[data-out]'], onSetup: outSetup }),
+    ];
+
+    await loadFeatures(features, { root });
+
+    expect(inSetup).toHaveBeenCalledOnce();
+    expect(outSetup).not.toHaveBeenCalled();
+  });
+
+  it('AC-3: passes only descendants of root to onEach', async () => {
+    document.body.innerHTML =
+      '<div id="container"><div data-item id="inside"></div></div><div data-item id="outside"></div>';
+    const root = document.getElementById('container')!;
+    const seenIds: string[] = [];
+    const features = [
+      makeLoadable('items', {
+        selectors: ['[data-item]'],
+        onEach: ({ el }) => {
+          seenIds.push(el.id);
+        },
+      }),
+    ];
+
+    await loadFeatures(features, { root });
+
+    expect(seenIds).toEqual(['inside']);
+  });
+
+  it('AC-4: does not match a feature whose selector matches only the root element itself', async () => {
+    document.body.innerHTML = '<div id="container" data-self></div>';
+    const root = document.getElementById('container')!;
+    const onSetup = vi.fn();
+    const features = [
+      makeLoadable('self', { selectors: ['[data-self]'], onSetup }),
+    ];
+
+    await loadFeatures(features, { root });
+
+    expect(onSetup).not.toHaveBeenCalled();
+  });
+
+  it('AC-5: skips an invalid selector with the [loader] warn and keeps evaluating the rest under a custom root', async () => {
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(noop);
+    document.body.innerHTML = '<div id="container"><div data-ok></div></div>';
+    const root = document.getElementById('container')!;
+    const onSetup = vi.fn();
+    const features = [
+      makeLoadable('mixed', {
+        selectors: ['[invalid===]', '[data-ok]'],
+        onSetup,
+      }),
+    ];
+
+    await loadFeatures(features, { root });
+
+    expect(warnSpy).toHaveBeenCalledWith(
+      expect.stringContaining('[loader] Feature "mixed" has invalid selector'),
+    );
+    expect(onSetup).toHaveBeenCalledOnce();
+  });
+
+  it('AC-6: passes the custom root to onSetup for global and non-global features', async () => {
+    document.body.innerHTML = '<div id="container"><div data-a></div></div>';
+    const root = document.getElementById('container')!;
+    const seen: Record<string, unknown> = {};
+    const features = [
+      makeLoadable('local', {
+        selectors: ['[data-a]'],
+        onSetup: (_selectors, context) => {
+          seen.local = context.root;
+        },
+      }),
+      makeLoadable(
+        'glob',
+        {
+          global: true,
+          onSetup: (_selectors, context) => {
+            seen.glob = context.root;
+          },
+        },
+        { global: true },
+      ),
+    ];
+
+    await loadFeatures(features, { root });
+
+    expect(seen.local).toBe(root);
+    expect(seen.glob).toBe(root);
+  });
+
+  it('AC-7: passes the custom root in the context of every onEach call', async () => {
+    document.body.innerHTML =
+      '<div id="container"><div data-item></div><div data-item></div></div>';
+    const root = document.getElementById('container')!;
+    const seenRoots: unknown[] = [];
+    const features = [
+      makeLoadable('items', {
+        selectors: ['[data-item]'],
+        onEach: (context) => {
+          seenRoots.push(context.root);
+        },
+      }),
+    ];
+
+    await loadFeatures(features, { root });
+
+    expect(seenRoots).toHaveLength(2);
+    expect(seenRoots.every((r) => r === root)).toBe(true);
+  });
+
+  it('AC-8: passes document to onSetup and onEach and scans the whole document when root is omitted', async () => {
+    document.body.innerHTML =
+      '<div id="container"><div data-item></div></div><div data-item></div>';
+    let setupRoot: unknown;
+    const eachRoots: unknown[] = [];
+    const features = [
+      makeLoadable('items', {
+        selectors: ['[data-item]'],
+        onSetup: (_selectors, context) => {
+          setupRoot = context.root;
+        },
+        onEach: (context) => {
+          eachRoots.push(context.root);
+        },
+      }),
+    ];
+
+    await loadFeatures(features);
+
+    expect(setupRoot).toBe(document);
+    expect(eachRoots).toEqual([document, document]);
+  });
+
+  it('AC-9: matches no non-global feature and does not throw when root is detached', async () => {
+    document.body.innerHTML = '<div data-a></div>';
+    const root = document.createElement('div');
+    const onSetup = vi.fn();
+    const features = [makeLoadable('a', { selectors: ['[data-a]'], onSetup })];
+
+    await expect(loadFeatures(features, { root })).resolves.toBeUndefined();
+
+    expect(onSetup).not.toHaveBeenCalled();
+  });
+
+  it('AC-10: always matches global features regardless of root', async () => {
+    const root = document.createElement('div');
+    const onSetup = vi.fn();
+    const features = [
+      makeLoadable('glob', { global: true, onSetup }, { global: true }),
+    ];
+
+    await loadFeatures(features, { root });
+
+    expect(onSetup).toHaveBeenCalledOnce();
+  });
+});

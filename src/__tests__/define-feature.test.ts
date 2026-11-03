@@ -365,7 +365,7 @@ describe('defineFeature', () => {
     });
 
     it('exposes OnSetupContext and OnSetupFn from the package entry point (AC-4)', () => {
-      const context: OnSetupContext = { deps: {} };
+      const context: OnSetupContext = { deps: {}, root: document };
       // OnSetupFn is also re-exported from the entry point and now takes the
       // 2nd context arg with `deps` typed as Record<string, unknown>.
       const setup: OnSetupFn = (selectors, { deps }) => ({
