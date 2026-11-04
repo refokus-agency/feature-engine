@@ -38,8 +38,9 @@ export default defineFeature({
   selectors: ['[data-feature="accordion"]'],
   priority: 10,
 
-  onSetup(selectors) {
+  onSetup(selectors, { deps }) {
     // Runs once. Return value becomes `ctx` in onEach.
+    // `deps` holds the values exposed by features listed in `dependencies`.
     // Return `false` to abort the feature entirely.
     return { openIndex: 0 };
   },
@@ -140,10 +141,11 @@ Validates and freezes a feature descriptor. Throws on invalid input.
 | `global` | `boolean` | no | `false` | Always loads regardless of DOM (skips selector matching) |
 | `dependencies` | `string[]` | no | `[]` | Feature IDs that must complete before this one runs |
 | `enabled` | `boolean` | no | `true` | Set `false` to disable without removing the file |
-| `timeout` | `number \| null` | no | `null` | Max ms for lifecycle execution. `null` = no limit |
-| `onSetup` | `OnSetupFn` | * | | Runs once. Return `false` to abort; any other value becomes `ctx` |
+| `timeout` | `number \| null` | no | `null` | Max ms for lifecycle execution. Must be positive. `null` inherits the global `timeout` passed to `loadFeatures` (default `10000`) — it does **not** mean "no limit" |
+| `onSetup` | `OnSetupFn` | * | | Runs once with `(selectors, { deps, root, signal })`. Return `false` to abort; any other value becomes `ctx` |
 | `onEach` | `OnEachFn` | * | | Runs per matched element. Not allowed with `global: true` |
 | `onReady` | `OnReadyFn` | no | | Runs after all `onEach` calls complete. Receives `{ ctx, signal, root }` |
+| `expose` | `ExposeFn \| null` | no | `null` | Runs last, after `onReady`, with `ctx`. Its return value is published under this feature's `id` and handed to dependents as `deps[id]` in `onSetup` |
 
 \* At least one of `onSetup` or `onEach` is required.
 
@@ -153,7 +155,7 @@ Loads and executes features in dependency order.
 
 | Option | Type | Default | Description |
 |--------|------|---------|-------------|
-| `timeout` | `number` | `10000` | Global timeout in ms (feature-level `timeout` overrides this) |
+| `timeout` | `number` | `10000` | Global timeout in ms, used by every feature whose own `timeout` is `null` (a feature-level `timeout` overrides it). `0` disables the timeout globally; negative or `NaN` values fall back to `10000` |
 | `logging` | `boolean` | `true` | Enable/disable console warnings |
 | `root` | `Document \| Element` | `document` | Container that scopes feature matching and `onEach` element queries. Only descendants of `root` are searched |
 
@@ -162,7 +164,7 @@ Loads and executes features in dependency order.
 1. **Match** — global features always match (they ignore `root`); others require at least one selector matching a descendant of `root`
 2. **Sort** — topological sort by dependencies, then by priority
 3. **Load** — lazy-import all matched features in parallel (`Promise.allSettled`)
-4. **Execute** — group features into priority waves. Features within each wave run in parallel (`Promise.allSettled`), respecting inter-feature dependencies via a dependency gate. Waves execute sequentially (lower priority first). If a dependency fails, its dependents are skipped
+4. **Execute** — group features into priority waves. Features within each wave run in parallel (`Promise.allSettled`), respecting inter-feature dependencies via a dependency gate. Waves execute sequentially (lower priority first). A feature is **promoted** into the wave of its dependency whenever that dependency sits in a later wave, regardless of the feature's own `priority`. If a dependency fails, its dependents are skipped
 
 ### `featureMetadataPlugin(options?): Plugin`
 
@@ -181,18 +183,60 @@ Features with `enabled: false` and duplicate IDs are excluded. The virtual modul
 ```
 defineFeature()
   │
-  ├─ onSetup(selectors, { deps, root, signal })  → runs once, receives matched selectors
-  │    ├─ returns false      → abort (skip onEach + onReady)
-  │    └─ returns ctx        → passed to onEach and onReady
+  ├─ onSetup(selectors, { deps, root, signal })  → runs once; receives matched selectors,
+  │    │                                            the exposed values of its dependencies,
+  │    │                                            the loader root and the abort signal
+  │    ├─ returns false      → abort (skip onEach, onReady + expose)
+  │    └─ returns ctx        → passed to onEach, onReady and expose
   │
   ├─ onEach({ el, index, elements, ctx, root, signal })  → runs per matched element
   │
-  └─ onReady({ ctx, signal, root })  → runs after all elements processed
+  ├─ onReady({ ctx, signal, root })  → runs after all elements processed
+  │
+  └─ expose(ctx)             → runs last; return value is published as deps[id]
+                               for dependents, then the feature is marked ready
 ```
 
 `ctx` in `onReady` is the value returned by `onSetup` (`undefined` when `onSetup` is absent), so state collected per mount can live there instead of in module-level variables. An `onReady()` that ignores its argument keeps working.
 
-For **global features** (`global: true`): only `onSetup` and `onReady` run. `onEach` is not allowed.
+For **global features** (`global: true`): only `onSetup`, `onReady` and `expose` run. `onEach` is not allowed.
+
+**Wave promotion.** Features run in waves keyed by `priority`, lowest first. If a feature depends on one placed in a later wave, it is promoted into that wave regardless of its own `priority` (the loader logs a warning when this happens). Priority orders independent features; dependencies always win.
+
+### Sharing state between features: `dependencies` → `expose` → `deps`
+
+```ts
+// src/features/lenis.feature.js
+export default defineFeature({
+  id: 'lenis',
+  selectors: [],
+  priority: 0,
+  global: true,
+
+  onSetup() {
+    return { lenis: new Lenis() };
+  },
+
+  expose(ctx) {
+    return ctx.lenis; // published under the id "lenis"
+  },
+});
+
+// src/features/scroll-animations.feature.js
+export default defineFeature({
+  id: 'scroll-animations',
+  selectors: ['[data-animate]'],
+  priority: 20,
+  dependencies: ['lenis'],
+
+  onSetup(selectors, { deps }) {
+    const lenis = deps.lenis; // the value returned by lenis's expose()
+    return { lenis };
+  },
+});
+```
+
+A feature without `expose` publishes nothing, and its dependents see no entry for it. If a dependency fails, its dependents are skipped.
 
 ### Querying the DOM from hooks
 
