@@ -143,7 +143,7 @@ Validates and freezes a feature descriptor. Throws on invalid input.
 | `timeout` | `number \| null` | no | `null` | Max ms for lifecycle execution. `null` = no limit |
 | `onSetup` | `OnSetupFn` | * | | Runs once. Return `false` to abort; any other value becomes `ctx` |
 | `onEach` | `OnEachFn` | * | | Runs per matched element. Not allowed with `global: true` |
-| `onReady` | `OnReadyFn` | no | | Runs after all `onEach` calls complete |
+| `onReady` | `OnReadyFn` | no | | Runs after all `onEach` calls complete. Receives `{ ctx, signal, root }` |
 
 \* At least one of `onSetup` or `onEach` is required.
 
@@ -181,14 +181,16 @@ Features with `enabled: false` and duplicate IDs are excluded. The virtual modul
 ```
 defineFeature()
   │
-  ├─ onSetup(selectors, { deps, root })  → runs once, receives matched selectors
+  ├─ onSetup(selectors, { deps, root, signal })  → runs once, receives matched selectors
   │    ├─ returns false      → abort (skip onEach + onReady)
-  │    └─ returns ctx        → passed to onEach
+  │    └─ returns ctx        → passed to onEach and onReady
   │
-  ├─ onEach({ el, index, elements, ctx, root })  → runs per matched element
+  ├─ onEach({ el, index, elements, ctx, root, signal })  → runs per matched element
   │
-  └─ onReady()               → runs after all elements processed
+  └─ onReady({ ctx, signal, root })  → runs after all elements processed
 ```
+
+`ctx` in `onReady` is the value returned by `onSetup` (`undefined` when `onSetup` is absent), so state collected per mount can live there instead of in module-level variables. An `onReady()` that ignores its argument keeps working.
 
 For **global features** (`global: true`): only `onSetup` and `onReady` run. `onEach` is not allowed.
 
@@ -207,6 +209,26 @@ onEach: ({ el, root }) => {
 
 **Descendants only:** `root` is searched with `root.querySelector` / `root.querySelectorAll`, which never return the `root` element itself. A selector that matches only the container does not match the feature. To target the container, put the selector on a child element of the container instead.
 
+### Cancelling work with `signal`
+
+`onSetup`, `onEach` and `onReady` receive the same `AbortSignal`, one per feature. It follows the feature's lifetime: it is aborted when the feature stops being alive, and never because the feature finished mounting. Pass it to anything that accepts one, so listeners and requests are released together with the feature:
+
+```ts
+onSetup: (_selectors, { signal }) => {
+  window.addEventListener('resize', onResize, { signal });
+},
+```
+
+The signal is aborted when:
+
+- the feature's `timeout` elapses;
+- a hook (or `expose`) throws;
+- `onSetup` returns `false`.
+
+A feature that completes is never aborted, whatever its timeout (including `0`, disabled), so under `loadFeatures` its signal stays live for the rest of the page. `expose` does not receive the signal.
+
+Registering a listener on an already-aborted signal is a no-op, and a timed-out run keeps executing in the background until it reaches the next hook boundary. Check `signal.aborted` before starting work that has no `signal` option. `signal.reason` is not part of the stable API: do not branch on it.
+
 ## Types
 
 All types are exported from the main entry point:
@@ -218,10 +240,11 @@ import type {
   FeatureMeta,             // Metadata + lazy loader (used by loadFeatures)
   LoaderOptions,           // Options for loadFeatures()
   OnSetupFn,               // (selectors: string[], context: OnSetupContext) => unknown | false | Promise<...>
-  OnSetupContext,          // { deps, root }
+  OnSetupContext,          // { deps, root, signal }
   OnEachFn,                // (ctx: FeatureEachContext) => void | Promise<void>
-  OnReadyFn,               // () => void | Promise<void>
-  FeatureEachContext,       // { el, index, elements, ctx, root }
+  OnReadyFn,               // (context: OnReadyContext) => void | Promise<void>
+  OnReadyContext,          // { ctx, signal, root }
+  FeatureEachContext,       // { el, index, elements, ctx, root, signal }
 } from '@refokus-agency/feature-engine';
 ```
 

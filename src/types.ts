@@ -6,6 +6,8 @@ export interface FeatureEachContext {
   ctx: unknown;
   /** Resolved loader root; `document` when no root option was given. */
   root: Document | Element;
+  /** Same per-feature signal passed to `onSetup` and `onReady`. */
+  signal: AbortSignal;
 }
 
 /** Context object passed as the second argument to `onSetup`; `deps` maps a declared dependency's feature id to its exposed value. */
@@ -13,6 +15,8 @@ export interface OnSetupContext {
   deps: Record<string, unknown>;
   /** Resolved loader root; `document` when no root option was given. */
   root: Document | Element;
+  /** Aborted when the feature stops being alive (timeout, a hook throws, or `onSetup` returns `false`). Never aborted on success. */
+  signal: AbortSignal;
 }
 
 /** Setup callback — receives matched selectors and a context of exposed dependencies. Return `false` to abort; any other return value is passed as `ctx` to `onEach`. */
@@ -24,8 +28,18 @@ export type OnSetupFn = (
 /** Per-element callback — runs once for each element matching the feature selectors. */
 export type OnEachFn = (ctx: FeatureEachContext) => void | Promise<void>;
 
-/** Ready callback — runs after all elements have been processed. */
-export type OnReadyFn = () => void | Promise<void>;
+/** Context object passed to `onReady`. */
+export interface OnReadyContext {
+  /** Value returned by `onSetup`; `undefined` when `onSetup` is absent. */
+  ctx: unknown;
+  /** Same per-feature signal passed to `onSetup` and `onEach`. */
+  signal: AbortSignal;
+  /** Resolved loader root; `document` when no root option was given. */
+  root: Document | Element;
+}
+
+/** Ready callback — runs after all elements have been processed. Implementations that ignore the context stay valid. */
+export type OnReadyFn = (context: OnReadyContext) => void | Promise<void>;
 
 /** Public-API projection called after the lifecycle completes; its return value is
  *  exposed to dependents. `ctx` is `any` so callers can annotate it with the concrete

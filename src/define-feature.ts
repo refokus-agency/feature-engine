@@ -3,15 +3,19 @@ import type { FeatureDescriptor, FeatureDescriptorInput } from './types.ts';
 /**
  * Validates and freezes a feature descriptor.
  *
- * Lifecycle: `onSetup(selectors, { deps, root })` → `onEach({ el, index, elements, ctx, root })` → `onReady()`
+ * Lifecycle: `onSetup(selectors, { deps, root, signal })` → `onEach({ el, index, elements, ctx, root, signal })`
+ * → `onReady({ ctx, signal, root })`
  * For global features (`global: true`): `onSetup` → `onReady` only (`onEach` is not permitted).
  *
  * - `onSetup` runs once. Return `false` to abort; anything else becomes `ctx`.
  *   If omitted, `ctx` passed to `onEach` will be `undefined`.
- * - `onEach` runs per matched DOM element. Receives `{ el, index, elements, ctx, root }`.
+ * - `onEach` runs per matched DOM element. Receives `{ el, index, elements, ctx, root, signal }`.
  * - `root` is the container `loadFeatures` was scoped to (`document` by default); query
  *   through `root` or `el` instead of `document`.
- * - `onReady` runs after all `onEach` calls. Post-processing (e.g. `ScrollTrigger.refresh`).
+ * - `onReady` runs after all `onEach` calls. Receives `{ ctx, signal, root }`, where `ctx` is
+ *   the `onSetup` return value. Post-processing (e.g. `ScrollTrigger.refresh`).
+ * - `signal` is one `AbortSignal` per feature, aborted when the feature stops being alive
+ *   (timeout, a hook throws, or `onSetup` returns `false`) — never on success.
  *
  * At least one of `onSetup` or `onEach` is required.
  *

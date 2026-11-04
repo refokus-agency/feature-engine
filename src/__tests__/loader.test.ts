@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import type { MockInstance } from 'vitest';
 import { loadFeatures } from '../loader.ts';
 import { defineFeature } from '../define-feature.ts';
@@ -2445,5 +2445,280 @@ describe('loadFeatures — root option (#135)', () => {
     await loadFeatures(features, { root });
 
     expect(onSetup).toHaveBeenCalledOnce();
+  });
+});
+
+describe('loadFeatures — AbortSignal in hooks (#136)', () => {
+  beforeEach(() => {
+    document.body.innerHTML = '';
+    vi.restoreAllMocks();
+    vi.spyOn(console, 'warn').mockImplementation(noop);
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it('AC-1: passes an AbortSignal in the onSetup context for global and non-global features', async () => {
+    document.body.innerHTML = '<div class="a"></div>';
+    const seen: { local?: unknown; glob?: unknown } = {};
+    const features = [
+      makeLoadable('local', {
+        selectors: ['.a'],
+        onSetup: (_s, context) => {
+          seen.local = context.signal;
+        },
+      }),
+      makeLoadable(
+        'glob',
+        {
+          global: true,
+          onSetup: (_s, context) => {
+            seen.glob = context.signal;
+          },
+        },
+        { global: true },
+      ),
+    ];
+
+    await loadFeatures(features);
+
+    expect(seen.local).toBeInstanceOf(AbortSignal);
+    expect(seen.glob).toBeInstanceOf(AbortSignal);
+  });
+
+  it('AC-2: passes an AbortSignal in the context of every onEach call', async () => {
+    document.body.innerHTML = '<div class="a"></div><div class="a"></div>';
+    const seen: unknown[] = [];
+    const features = [
+      makeLoadable('each', {
+        selectors: ['.a'],
+        onEach: (context) => {
+          seen.push(context.signal);
+        },
+      }),
+    ];
+
+    await loadFeatures(features);
+
+    expect(seen).toHaveLength(2);
+    expect(seen.every((s) => s instanceof AbortSignal)).toBe(true);
+  });
+
+  it('AC-3: calls onReady with { ctx, signal, root } for global and non-global features', async () => {
+    document.body.innerHTML =
+      '<div id="container"><div class="a"></div><div class="b"></div></div>';
+    const root = document.getElementById('container')!;
+    const withSetup = vi.fn();
+    const withoutSetup = vi.fn();
+    const glob = vi.fn();
+    const features = [
+      makeLoadable('with-setup', {
+        selectors: ['.a'],
+        onSetup: () => ({ token: 'abc' }),
+        onReady: withSetup,
+      }),
+      makeLoadable('without-setup', {
+        selectors: ['.b'],
+        onReady: withoutSetup,
+      }),
+      makeLoadable(
+        'glob',
+        { global: true, onSetup: () => 42, onReady: glob },
+        { global: true },
+      ),
+    ];
+
+    await loadFeatures(features, { root });
+
+    expect(withSetup).toHaveBeenCalledWith({
+      ctx: { token: 'abc' },
+      signal: expect.any(AbortSignal),
+      root,
+    });
+    expect(withoutSetup).toHaveBeenCalledWith({
+      ctx: undefined,
+      signal: expect.any(AbortSignal),
+      root,
+    });
+    expect(glob).toHaveBeenCalledWith({
+      ctx: 42,
+      signal: expect.any(AbortSignal),
+      root,
+    });
+  });
+
+  it('AC-4: hands every hook of a feature the same signal and each feature its own', async () => {
+    document.body.innerHTML = '<div class="a"></div><div class="a"></div>';
+    const seen: Record<string, AbortSignal[]> = { one: [], two: [] };
+    const track = (id: string) => ({
+      selectors: ['.a'],
+      onSetup: (_s: string[], { signal }: { signal: AbortSignal }) => {
+        seen[id]!.push(signal);
+      },
+      onEach: ({ signal }: { signal: AbortSignal }) => {
+        seen[id]!.push(signal);
+      },
+      onReady: ({ signal }: { signal: AbortSignal }) => {
+        seen[id]!.push(signal);
+      },
+    });
+    const features = [
+      makeLoadable('one', track('one')),
+      makeLoadable('two', track('two')),
+    ];
+
+    await loadFeatures(features);
+
+    expect(seen.one).toHaveLength(4);
+    expect(new Set(seen.one).size).toBe(1);
+    expect(new Set(seen.two).size).toBe(1);
+    expect(seen.one![0]).not.toBe(seen.two![0]);
+  });
+
+  it('AC-5: aborts the signal the hooks received when the feature times out', async () => {
+    vi.useFakeTimers();
+    let signal: AbortSignal | undefined;
+    const features = [
+      makeLoadable(
+        'slow',
+        {
+          global: true,
+          onSetup: (_s, context) => {
+            signal = context.signal;
+            return new Promise(() => {});
+          },
+        },
+        { global: true, timeout: 50 },
+      ),
+    ];
+
+    const done = loadFeatures(features);
+    while (!signal) await vi.advanceTimersByTimeAsync(0);
+    expect(signal.aborted).toBe(false);
+
+    await vi.advanceTimersByTimeAsync(50);
+    await done;
+
+    expect(signal.aborted).toBe(true);
+  });
+
+  it('AC-6: aborts the signal when a hook throws, removing listeners registered with it', async () => {
+    document.body.innerHTML = '<div class="a"></div>';
+    const listener = vi.fn();
+    let signal: AbortSignal | undefined;
+    const features = [
+      makeLoadable('broken', {
+        selectors: ['.a'],
+        onSetup: (_s, context) => {
+          signal = context.signal;
+          window.addEventListener('fe-136', listener, { signal });
+        },
+        onEach: () => {
+          throw new Error('boom');
+        },
+      }),
+    ];
+
+    await loadFeatures(features);
+    window.dispatchEvent(new Event('fe-136'));
+
+    expect(signal!.aborted).toBe(true);
+    expect(listener).not.toHaveBeenCalled();
+  });
+
+  it('AC-6: aborts the signal when expose throws', async () => {
+    let signal: AbortSignal | undefined;
+    const features = [
+      makeLoadable(
+        'broken-expose',
+        {
+          global: true,
+          onSetup: (_s, context) => {
+            signal = context.signal;
+          },
+          expose: () => {
+            throw new Error('boom');
+          },
+        },
+        { global: true },
+      ),
+    ];
+
+    await loadFeatures(features);
+
+    expect(signal!.aborted).toBe(true);
+  });
+
+  it('AC-7: aborts the signal when onSetup returns false', async () => {
+    const onReady = vi.fn();
+    let signal: AbortSignal | undefined;
+    const features = [
+      makeLoadable(
+        'opt-out',
+        {
+          global: true,
+          onSetup: (_s, context) => {
+            signal = context.signal;
+            return false;
+          },
+          onReady,
+        },
+        { global: true },
+      ),
+    ];
+
+    await loadFeatures(features);
+
+    expect(signal!.aborted).toBe(true);
+    expect(onReady).not.toHaveBeenCalled();
+  });
+
+  it('AC-8: does not abort the signal of a feature that completes, with or without a timeout', async () => {
+    vi.useFakeTimers();
+    const signals: Record<string, AbortSignal> = {};
+    const capture = (id: string, timeout: number | null) =>
+      makeLoadable(
+        id,
+        {
+          global: true,
+          onSetup: (_s, context) => {
+            signals[id] = context.signal;
+          },
+        },
+        { global: true, timeout },
+      );
+    const features = [capture('timed', 50), capture('untimed', 0)];
+
+    const done = loadFeatures(features);
+    await vi.advanceTimersByTimeAsync(0);
+    await done;
+    await vi.advanceTimersByTimeAsync(100);
+
+    expect(signals.timed!.aborted).toBe(false);
+    expect(signals.untimed!.aborted).toBe(false);
+  });
+
+  it('AC-9: keeps running a zero-argument onReady and calls expose with only ctx', async () => {
+    const order: string[] = [];
+    const expose = vi.fn((ctx: unknown) => ctx);
+    const features = [
+      defineLoadable({
+        id: 'legacy',
+        selectors: [],
+        priority: 0,
+        global: true,
+        onSetup: () => ({ token: 'abc' }),
+        onReady() {
+          order.push('ready');
+        },
+        expose,
+      }),
+    ];
+
+    await loadFeatures(features);
+
+    expect(order).toEqual(['ready']);
+    expect(expose).toHaveBeenCalledWith({ token: 'abc' });
   });
 });

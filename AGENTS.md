@@ -46,7 +46,9 @@ Three independent pieces, each maps to a phase of the system:
 
 ### Feature lifecycle
 
-`onSetup(selectors, { deps, root })` → `onEach({ el, index, elements, ctx, root })` per element → `onReady()` → `expose(ctx)`. `onSetup` returning `false` aborts the feature (skips `onEach`/`onReady`); any other return becomes `ctx`. Global features run `onSetup`/`onReady` only — `onEach` is rejected at `defineFeature` time. Execution respects `AbortSignal` (driven by `withTimeout`) and checks `signal.aborted` between every hook.
+`onSetup(selectors, { deps, root, signal })` → `onEach({ el, index, elements, ctx, root, signal })` per element → `onReady({ ctx, signal, root })` → `expose(ctx)`. `onSetup` returning `false` aborts the feature (skips `onEach`/`onReady`); any other return becomes `ctx`. Global features run `onSetup`/`onReady` only — `onEach` is rejected at `defineFeature` time. Execution checks `signal.aborted` between every hook.
+
+Each feature gets one `AbortController` (created in `dispatchWaves`) whose `signal` is handed to `onSetup`, `onEach` and `onReady` (not `expose`). It has lifetime semantics: it is aborted when the feature stops being alive — `withTimeout` on timeout, `dispatchWaves`'s `catch` when a hook or `expose` throws, and `initFeature` when `onSetup` returns `false` — and never on a successful run, so `{ signal }` registrations survive the mount.
 
 Features share values through `expose`/`deps`: after a feature's lifecycle completes, its optional `expose(ctx)` projection runs and the return value is published under the feature's id. Every dependent then receives it via `onSetup`'s second argument — `deps` maps each id in `dependencies` to that feature's exposed value. This is what the `DependencyGate` is gating on, so a feature declaring a dependency can read its value without reaching for globals. A feature with no `expose` publishes nothing and its dependents see no entry for it.
 
