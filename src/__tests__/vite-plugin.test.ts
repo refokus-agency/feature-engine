@@ -298,6 +298,33 @@ describe('parseFeatureFile', () => {
       );
     });
 
+    it.each([
+      ['selectors', '"<script>"'],
+      ['selectors', '1n'],
+      ['selectors', '/a>b/'],
+      ['selectors', '5'],
+      ['dependencies', '1n'],
+      ['dependencies', '/a>b/'],
+      ['dependencies', '"dep"'],
+      ['dependencies', 'true'],
+    ])('returns null for scalar %s (%s)', (key, literal) => {
+      const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      const source = featureSource(`
+        id: "scalar",
+        selectors: ["[data-x]"],
+        priority: 1,
+        ${key}: ${literal},
+        onSetup() {}
+      `);
+      const result = parseFeatureFile(source, 'scalar.feature.js');
+      expect(result).toBeNull();
+      expect(warnSpy).toHaveBeenCalledWith(
+        expect.stringContaining(
+          `"${key}" must be an array of string literals in scalar.feature.js`,
+        ),
+      );
+    });
+
     it('skips computed properties', () => {
       const source = `const key = "id";\nexport default defineFeature({\n  [key]: "computed",\n  id: "real",\n  selectors: ["[data-x]"],\n  priority: 1,\n  onSetup() {}\n});\n`;
       const result = parseFeatureFile(source, 'computed.feature.js');
