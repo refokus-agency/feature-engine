@@ -160,6 +160,15 @@ function extractMetadata(
         );
         return null;
       }
+      if (
+        (key === 'selectors' || key === 'dependencies') &&
+        !Array.isArray(value)
+      ) {
+        console.warn(
+          `[featureMetadataPlugin] "${key}" must be an array of string literals in ${filePath} — skipping file`,
+        );
+        return null;
+      }
       metadata[key] = value;
     }
   }
