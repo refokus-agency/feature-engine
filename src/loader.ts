@@ -1,4 +1,12 @@
-import type { FeatureDescriptor, FeatureMeta, LoaderOptions } from './types.ts';
+import type {
+  FeatureDescriptor,
+  FeatureMeta,
+  FeatureRuntime,
+  LoaderOptions,
+  MountHandle,
+  MountOptions,
+  RuntimeOptions,
+} from './types.ts';
 
 const DEFAULT_TIMEOUT_MS = 10_000;
 
@@ -21,15 +29,21 @@ interface DependencyGate {
   waitForDependency: (id: string) => Promise<void>;
 }
 
-interface ExecutionContext {
-  knownIds: Set<string>;
+// Gate and outcomes for a set of features: the runtime's globals, or one mount's page features.
+interface FeatureScope {
   gate: DependencyGate;
-  prunedEdges: Set<string>;
   failedIds: Set<string>;
   // Accumulates the exposed value of each feature whose `expose` actually ran, keyed by feature id.
   // Features without `expose`, or that short-circuited (disabled/aborted/`onSetup`→false), get no
   // entry — so `exposedValues.has(id)` is a meaningful "did this feature expose?" check.
   exposedValues: Map<string, unknown>;
+}
+
+interface ExecutionContext {
+  knownIds: Set<string>;
+  prunedEdges: Set<string>;
+  // Scope that owns feature `id`: the runtime's global scope for globals, the mount's otherwise.
+  scopeOf: (id: string) => FeatureScope;
   warn: LogFn;
   // Resolved `root` option (`document` when omitted); scopes element queries in `initFeature`.
   root: Document | Element;
@@ -303,20 +317,22 @@ async function runWithDeps(
   const deps: Record<string, unknown> = {};
 
   if (validDeps.length) {
-    await Promise.all(validDeps.map(ctx.gate.waitForDependency));
+    await Promise.all(
+      validDeps.map((d) => ctx.scopeOf(d).gate.waitForDependency(d)),
+    );
 
-    const failedDep = validDeps.find((d) => ctx.failedIds.has(d));
+    const failedDep = validDeps.find((d) => ctx.scopeOf(d).failedIds.has(d));
     if (failedDep) {
       ctx.warn(
         `[loader] Feature "${meta.id}" skipped — dependency "${failedDep}" failed`,
       );
-      ctx.failedIds.add(meta.id);
+      ctx.scopeOf(meta.id).failedIds.add(meta.id);
       return;
     }
 
     // Build the deps record from directly-declared (validated) dependencies' exposed values.
     for (const depId of validDeps) {
-      deps[depId] = ctx.exposedValues.get(depId);
+      deps[depId] = ctx.scopeOf(depId).exposedValues.get(depId);
     }
   }
 
@@ -334,7 +350,7 @@ async function runWithDeps(
   // timed-out feature's abandoned background run from writing a ghost value after markReady
   // (when the timeout won the race, signal.aborted is true).
   if (exposed !== EXPOSE_SKIPPED && !controller.signal.aborted) {
-    ctx.exposedValues.set(meta.id, exposed);
+    ctx.scopeOf(meta.id).exposedValues.set(meta.id, exposed);
   }
 }
 
@@ -351,6 +367,7 @@ async function dispatchWaves(
     await Promise.allSettled(
       waveFeatures.map(async (feature) => {
         const controller = new AbortController();
+        const scope = ctx.scopeOf(feature.meta.id);
         try {
           const effectiveTimeout = feature.meta.timeout ?? globalTimeout;
 
@@ -370,30 +387,24 @@ async function dispatchWaves(
           // A failed feature is no longer alive: abort its signal so anything a hook
           // registered with it is released. Idempotent after a timeout abort.
           controller.abort();
-          ctx.failedIds.add(feature.meta.id);
+          scope.failedIds.add(feature.meta.id);
           ctx.warn(`[loader] Feature "${feature.meta.id}" failed:`, err);
         } finally {
-          ctx.gate.markReady(feature.meta.id);
+          scope.gate.markReady(feature.meta.id);
         }
       }),
     );
   }
 }
 
-interface LoadResult {
-  loaded: LoadedFeature[];
-  failedIds: Set<string>;
-}
-
 async function loadChunks(
   sortedFeatures: FeatureMeta[],
   knownIds: Set<string>,
   prunedEdges: Set<string>,
-  gate: DependencyGate,
+  scopeOf: (id: string) => FeatureScope,
   warn: LogFn,
-): Promise<LoadResult> {
+): Promise<LoadedFeature[]> {
   const results = await Promise.allSettled(sortedFeatures.map((f) => f.load()));
-  const failedIds = new Set<string>();
   const loaded: LoadedFeature[] = [];
 
   for (let i = 0; i < results.length; i++) {
@@ -402,8 +413,9 @@ async function loadChunks(
 
     if (result.status === 'rejected') {
       warn(`[loader] Failed to load feature "${meta.id}":`, result.reason);
-      failedIds.add(meta.id);
-      gate.markReady(meta.id);
+      const scope = scopeOf(meta.id);
+      scope.failedIds.add(meta.id);
+      scope.gate.markReady(meta.id);
       continue;
     }
 
@@ -414,23 +426,40 @@ async function loadChunks(
     });
   }
 
-  return { loaded, failedIds };
+  return loaded;
 }
 
-export async function loadFeatures(
+function makeWarn(logging: boolean | undefined): LogFn {
+  return logging !== false
+    ? (msg, ...args) => console.warn(msg, ...args)
+    : () => {};
+}
+
+function createScope(gate: DependencyGate): FeatureScope {
+  return { gate, failedIds: new Set(), exposedValues: new Map() };
+}
+
+interface RuntimeGlobals {
+  ids: Set<string>;
+  scope: FeatureScope;
+}
+
+function createGlobals(features: FeatureMeta[]): RuntimeGlobals {
+  return {
+    ids: new Set(features.filter((f) => f.global).map((f) => f.id)),
+    scope: createScope(createDependencyGate([], new Set())),
+  };
+}
+
+async function runMount(
   features: FeatureMeta[],
-  options?: Partial<LoaderOptions>,
+  globals: RuntimeGlobals,
+  candidates: FeatureMeta[],
+  root: Document | Element,
+  warn: LogFn,
+  globalTimeout: number,
 ): Promise<void> {
-  const warn: LogFn =
-    options?.logging !== false
-      ? (msg, ...args) => console.warn(msg, ...args)
-      : () => {};
-
-  const globalTimeout = resolveTimeout(options?.timeout, warn);
-
-  const root = options?.root ?? document;
-
-  const matchedFeatures = matchFeatures(features, root, warn);
+  const matchedFeatures = matchFeatures(candidates, root, warn);
   if (!matchedFeatures.length) return;
 
   matchedFeatures.sort((a, b) => a.priority - b.priority);
@@ -442,27 +471,49 @@ export async function loadFeatures(
 
   const matchedIds = new Set(sortedFeatures.map((f) => f.id));
   const knownIds = new Set(features.map((f) => f.id));
-  const gate = createDependencyGate(features, matchedIds);
+  const local = createScope(createDependencyGate(features, matchedIds));
+  const scopeOf = (id: string) => (globals.ids.has(id) ? globals.scope : local);
 
-  const { loaded, failedIds } = await loadChunks(
+  const loaded = await loadChunks(
     sortedFeatures,
     knownIds,
     prunedEdges,
-    gate,
+    scopeOf,
     warn,
   );
 
-  const ctx: ExecutionContext = {
-    knownIds,
-    gate,
-    prunedEdges,
-    failedIds,
-    exposedValues: new Map(),
-    warn,
-    root,
-  };
+  const ctx: ExecutionContext = { knownIds, prunedEdges, scopeOf, warn, root };
 
   const waves = groupIntoWaves(loaded, warn);
 
   await dispatchWaves(waves, ctx, globalTimeout);
+}
+
+export function createFeatureRuntime(
+  features: FeatureMeta[],
+  options?: RuntimeOptions,
+): FeatureRuntime {
+  const warn = makeWarn(options?.logging);
+  const timeout = resolveTimeout(options?.timeout, warn);
+  // Globals run on the first mount only; every later mount matches page features alone.
+  let candidates = features;
+  const globals = createGlobals(features);
+
+  function mount(mountOptions?: MountOptions): MountHandle {
+    const root = mountOptions?.root ?? document;
+    const ready = runMount(features, globals, candidates, root, warn, timeout);
+    candidates = features.filter((f) => !f.global);
+    return { ready, dispose: async () => {} };
+  }
+
+  return { mount, destroy: async () => {} };
+}
+
+// Stateless: one mount of a fresh runtime, never disposed.
+export async function loadFeatures(
+  features: FeatureMeta[],
+  options?: Partial<LoaderOptions>,
+): Promise<void> {
+  const { root, ...runtimeOptions } = options ?? {};
+  await createFeatureRuntime(features, runtimeOptions).mount({ root }).ready;
 }
