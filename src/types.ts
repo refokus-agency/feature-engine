@@ -114,3 +114,33 @@ export interface LoaderOptions {
   /** Container that scopes feature matching and element queries (descendants only). Defaults to `document`. */
   root?: Document | Element;
 }
+
+/** Configuration options for `createFeatureRuntime()`. */
+export interface RuntimeOptions {
+  /** Per-feature mount timeout in ms, same semantics as `LoaderOptions.timeout`. */
+  timeout?: number;
+  /** `false` silences `[loader]` and `[runtime]` warnings. */
+  logging?: boolean;
+}
+
+/** Options for `FeatureRuntime.mount()`. */
+export interface MountOptions {
+  /** Container that scopes feature matching and element queries (descendants only). Defaults to `document`. */
+  root?: Document | Element;
+}
+
+/** Handle for one mount of a `FeatureRuntime`. */
+export interface MountHandle {
+  /** Settles once every matched feature has settled. Never rejects. */
+  ready: Promise<void>;
+  /** Aborts and tears down this mount's non-global features. Never rejects. */
+  dispose(): Promise<void>;
+}
+
+/** Stateful runtime returned by `createFeatureRuntime()`. */
+export interface FeatureRuntime {
+  /** Mounts features into a root and returns its handle synchronously. */
+  mount(options?: MountOptions): MountHandle;
+  /** Disposes the current mount, then tears down the global features. Never rejects. */
+  destroy(): Promise<void>;
+}
