@@ -121,6 +121,8 @@ export interface RuntimeOptions {
   timeout?: number;
   /** `false` silences `[loader]` and `[runtime]` warnings. */
   logging?: boolean;
+  /** Cap in ms on one `dispose()` or `destroy()`, which resolves when it is reached. `0` disables it. Defaults to 3000. */
+  disposeTimeout?: number;
 }
 
 /** Options for `FeatureRuntime.mount()`. */
@@ -133,7 +135,7 @@ export interface MountOptions {
 export interface MountHandle {
   /** Settles once every matched feature has settled. Never rejects. */
   ready: Promise<void>;
-  /** Aborts and tears down this mount's non-global features. Never rejects. */
+  /** Aborts and tears down this mount's non-global features. Capped, idempotent, never rejects. */
   dispose(): Promise<void>;
 }
 
@@ -141,6 +143,6 @@ export interface MountHandle {
 export interface FeatureRuntime {
   /** Mounts features into a root and returns its handle synchronously. */
   mount(options?: MountOptions): MountHandle;
-  /** Disposes the current mount, then tears down the global features. Never rejects. */
+  /** Disposes the current mount, then tears down the global features. Capped, idempotent, never rejects. */
   destroy(): Promise<void>;
 }

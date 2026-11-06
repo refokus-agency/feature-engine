@@ -283,6 +283,32 @@ Registering a listener on an already-aborted signal is a no-op, and a timed-out 
 
 Resources a feature registers can be released by the feature itself: return a cleanup function from `onEach` for per-element resources, and declare `onDestroy({ ctx, signal, root })` for feature-wide ones. Both run only when features are mounted with `createFeatureRuntime`; `loadFeatures` never invokes them. See [docs/teardown.md](docs/teardown.md).
 
+### Page transitions: `createFeatureRuntime`
+
+When a page-transition library swaps the page container without reloading the document, mount the features into each new container and dispose the previous one:
+
+```ts
+import { createFeatureRuntime } from '@refokus-agency/feature-engine';
+import features from 'virtual:feature-metadata';
+
+const runtime = createFeatureRuntime(features, { timeout: 8000, disposeTimeout: 3000 });
+
+let page = runtime.mount({ root: container }); // returns synchronously
+await page.ready; // settles once every matched feature settled, never rejects
+
+// On navigation: no need to await, the next mount waits for the dispose.
+page.dispose();
+page = runtime.mount({ root: nextContainer });
+
+// When the whole app goes away:
+await runtime.destroy();
+```
+
+- Global features run once, on the first mount, and stay alive until `destroy()`. Their exposed values feed every later mount; values exposed by page features disappear with their page.
+- `dispose()` aborts every signal of the mount, then tears dependents down before their dependencies. It is capped by `disposeTimeout` (default 3000 ms, `0` disables the cap), never rejects and returns the same promise when called again.
+- `destroy()` disposes the current mount, then the globals, with the same guarantees. The first mount ran the globals, so its features and the globals are torn down in one pass, ordered by their declared dependencies. Only the current mount is tracked: dispose each mount when you start the next one. A `mount()` after `destroy()` warns and returns a handle that does nothing.
+- `loadFeatures` is a single mount of a fresh runtime that is never disposed.
+
 ## Types
 
 All types are exported from the main entry point:
@@ -293,6 +319,10 @@ import type {
   FeatureDescriptorInput,  // Input shape for defineFeature()
   FeatureMeta,             // Metadata + lazy loader (used by loadFeatures)
   LoaderOptions,           // Options for loadFeatures()
+  FeatureRuntime,          // { mount, destroy }, returned by createFeatureRuntime()
+  RuntimeOptions,          // { timeout, logging, disposeTimeout }
+  MountOptions,            // { root }
+  MountHandle,             // { ready, dispose }
   OnSetupFn,               // (selectors: string[], context: OnSetupContext) => unknown | false | Promise<...>
   OnSetupContext,          // { deps, root, signal }
   OnEachFn,                // (ctx: FeatureEachContext) => void | OnEachCleanup | Promise<void | OnEachCleanup>

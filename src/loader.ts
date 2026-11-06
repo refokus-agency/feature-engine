@@ -10,6 +10,7 @@ import type {
 } from './types.ts';
 
 const DEFAULT_TIMEOUT_MS = 10_000;
+const DEFAULT_DISPOSE_TIMEOUT_MS = 3000;
 
 // Returned by `initFeature` when the feature's `expose` did NOT run — either no `expose` is
 // declared, or the lifecycle short-circuited (disabled / aborted / `onSetup` returned `false`).
@@ -23,8 +24,6 @@ interface LoadedFeature {
   meta: FeatureMeta;
   descriptor: FeatureDescriptor;
   validDeps: string[];
-  // Index in the topological order; teardown runs in reverse.
-  order: number;
 }
 
 // One feature's run in one mount: what dispose needs to tear it down.
@@ -36,8 +35,18 @@ interface FeatureRecord {
   ctx: unknown;
   // `onSetup` completed without returning `false`, so `onDestroy` is owed.
   setupDone: boolean;
+  // Teardown has started: a cleanup returned from now on runs immediately.
+  tornDown: boolean;
   cleanups: OnEachCleanup[];
-  order: number;
+  // Validated dependency ids; teardown runs dependents before their dependencies.
+  deps: string[];
+}
+
+// Holds the records of a mount, or of the runtime's globals. Once closed (dispose
+// or destroy began), a record created for it is aborted before it starts.
+interface RecordOwner {
+  records: FeatureRecord[];
+  closed: boolean;
 }
 
 interface DependencyGate {
@@ -53,7 +62,7 @@ interface FeatureScope {
   // Features without `expose`, or that short-circuited (disabled/aborted/`onSetup`→false), get no
   // entry — so `exposedValues.has(id)` is a meaningful "did this feature expose?" check.
   exposedValues: Map<string, unknown>;
-  records: FeatureRecord[];
+  owner: RecordOwner;
 }
 
 interface ExecutionContext {
@@ -66,13 +75,16 @@ interface ExecutionContext {
   root: Document | Element;
 }
 
-function resolveTimeout(raw: number | undefined, warn: LogFn): number {
-  const timeout = raw ?? DEFAULT_TIMEOUT_MS;
+function resolveTimeout(
+  raw: number | undefined,
+  warn: LogFn,
+  fallback = DEFAULT_TIMEOUT_MS,
+  name = '[loader] Invalid timeout',
+): number {
+  const timeout = raw ?? fallback;
   if (timeout < 0 || Number.isNaN(timeout)) {
-    warn(
-      `[loader] Invalid timeout (${timeout}ms) — using default ${DEFAULT_TIMEOUT_MS}ms`,
-    );
-    return DEFAULT_TIMEOUT_MS;
+    warn(`${name} (${timeout}ms) — using default ${fallback}ms`);
+    return fallback;
   }
   return timeout;
 }
@@ -133,6 +145,7 @@ async function initFeature(
   record: FeatureRecord,
   selectors: string[],
   deps: Record<string, unknown>,
+  warn: LogFn,
 ): Promise<unknown> {
   const { descriptor: feature, controller, root } = record;
   const { signal } = controller;
@@ -165,7 +178,9 @@ async function initFeature(
         root,
         signal,
       });
-      if (typeof cleanup === 'function') record.cleanups.push(cleanup);
+      if (typeof cleanup !== 'function') continue;
+      if (record.tornDown) await attemptTeardown(cleanup, record.id, warn);
+      else record.cleanups.push(cleanup);
     }
   }
 
@@ -355,7 +370,7 @@ async function runWithDeps(
     }
   }
 
-  const exposed = await initFeature(record, meta.selectors, deps);
+  const exposed = await initFeature(record, meta.selectors, deps, ctx.warn);
 
   // Store the exposed value before this feature's markReady fires (markReady runs in
   // dispatchWaves's finally, after runWithDeps resolves). EXPOSE_SKIPPED means `expose` never
@@ -388,10 +403,12 @@ async function dispatchWaves(
           root: ctx.root,
           ctx: undefined,
           setupDone: false,
+          tornDown: false,
           cleanups: [],
-          order: feature.order,
+          deps: feature.validDeps,
         };
-        scope.records.push(record);
+        scope.owner.records.push(record);
+        if (scope.owner.closed) controller.abort();
         try {
           const effectiveTimeout = feature.meta.timeout ?? globalTimeout;
 
@@ -427,7 +444,6 @@ async function loadChunks(
   prunedEdges: Set<string>,
   scopeOf: (id: string) => FeatureScope,
   warn: LogFn,
-  orderBase: number,
 ): Promise<LoadedFeature[]> {
   // A load() that throws synchronously is recorded as a failed load, like a rejection.
   const results = await Promise.allSettled(
@@ -457,7 +473,6 @@ async function loadChunks(
       meta,
       descriptor,
       validDeps: buildValidDeps(meta, knownIds, prunedEdges, warn),
-      order: orderBase + i,
     });
   }
 
@@ -470,11 +485,8 @@ function makeWarn(logging: boolean | undefined): LogFn {
     : () => {};
 }
 
-function createScope(
-  gate: DependencyGate,
-  records: FeatureRecord[] = [],
-): FeatureScope {
-  return { gate, failedIds: new Set(), exposedValues: new Map(), records };
+function createScope(gate: DependencyGate, owner: RecordOwner): FeatureScope {
+  return { gate, failedIds: new Set(), exposedValues: new Map(), owner };
 }
 
 async function attemptTeardown(
@@ -493,6 +505,7 @@ async function teardownRecord(
   record: FeatureRecord,
   warn: LogFn,
 ): Promise<void> {
+  record.tornDown = true;
   const { id, descriptor, controller, root, ctx, setupDone, cleanups } = record;
   for (const cleanup of cleanups) await attemptTeardown(cleanup, id, warn);
   const onDestroy = setupDone ? descriptor.onDestroy : null;
@@ -505,40 +518,87 @@ async function teardownRecord(
   }
 }
 
-// Empties every list first, so tearing down the same lists again is a no-op.
-async function teardownRecords(
-  lists: FeatureRecord[][],
-  warn: LogFn,
-): Promise<void> {
-  const pending = lists
-    .flatMap((records) => records.splice(0))
-    .sort((a, b) => b.order - a.order);
-  for (const record of pending) record.controller.abort();
-  for (const record of pending) await teardownRecord(record, warn);
-}
-
-interface RuntimeGlobals {
-  ids: Set<string>;
-  scope: FeatureScope;
-}
-
-function createGlobals(features: FeatureMeta[]): RuntimeGlobals {
-  return {
-    ids: new Set(features.filter((f) => f.global).map((f) => f.id)),
-    scope: createScope(createDependencyGate([], new Set())),
+// Dependency depth of each record among `records`: 0 for a record none of whose
+// dependencies is in the list. `deps` holds only unpruned edges, so it is acyclic.
+function computeLevels(records: FeatureRecord[]): Map<FeatureRecord, number> {
+  const byId = new Map(records.map((r) => [r.id, r]));
+  const levels = new Map<FeatureRecord, number>();
+  const levelOf = (record: FeatureRecord): number => {
+    let level = levels.get(record);
+    if (level === undefined) {
+      level = 0;
+      for (const dep of record.deps) {
+        const depRecord = byId.get(dep);
+        if (depRecord) level = Math.max(level, levelOf(depRecord) + 1);
+      }
+      levels.set(record, level);
+    }
+    return level;
   };
+  for (const record of records) levelOf(record);
+  return levels;
 }
 
-async function runMount(
-  features: FeatureMeta[],
-  globals: RuntimeGlobals,
-  candidates: FeatureMeta[],
-  root: Document | Element,
+// Aborts every record first, then tears down in parallel per level, deepest first.
+async function teardownRecords(
   records: FeatureRecord[],
   warn: LogFn,
-  globalTimeout: number,
-  orderBase: number,
 ): Promise<void> {
+  for (const record of records) record.controller.abort();
+  const levels = computeLevels(records);
+  for (let level = Math.max(-1, ...levels.values()); level >= 0; level--) {
+    await Promise.all(
+      records
+        .filter((record) => levels.get(record) === level)
+        .map((record) => teardownRecord(record, warn)),
+    );
+  }
+}
+
+// Settles when `promise` settles or after `ms`, whichever comes first; `0` disables the cap.
+function withCap(promise: Promise<void>, ms: number): Promise<void> {
+  if (ms <= 0) return promise;
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const cap = new Promise<void>((resolve) => {
+    timer = setTimeout(resolve, ms);
+  });
+  return Promise.race([promise, cap]).finally(() => clearTimeout(timer));
+}
+
+interface MountState extends RecordOwner {
+  root: Document | Element;
+  // The first mount runs the globals too.
+  withGlobals: boolean;
+  disposing?: Promise<void>;
+}
+
+interface RuntimeState {
+  features: FeatureMeta[];
+  globalIds: Set<string>;
+  globals: FeatureScope;
+  warn: LogFn;
+  timeout: number;
+  disposeTimeout: number;
+  mounted: boolean;
+  // The latest mount; `destroy()` tears it down with the globals.
+  current: MountState;
+  // Every dispose started so far; a new mount waits for it before matching.
+  pendingDispose: Promise<unknown>;
+  destroying?: Promise<void>;
+}
+
+async function runMount(rt: RuntimeState, state: MountState): Promise<void> {
+  // A dispose started after this mount() is awaited too, until no new one is queued.
+  let pending: Promise<unknown>;
+  do {
+    pending = rt.pendingDispose;
+    await pending;
+  } while (pending !== rt.pendingDispose);
+  const { features, warn, timeout: globalTimeout } = rt;
+  const { root } = state;
+  const candidates = state.withGlobals
+    ? features
+    : features.filter((f) => !f.global);
   const matchedFeatures = matchFeatures(candidates, root, warn);
   if (!matchedFeatures.length) return;
 
@@ -551,11 +611,8 @@ async function runMount(
 
   const matchedIds = new Set(sortedFeatures.map((f) => f.id));
   const knownIds = new Set(features.map((f) => f.id));
-  const local = createScope(
-    createDependencyGate(features, matchedIds),
-    records,
-  );
-  const scopeOf = (id: string) => (globals.ids.has(id) ? globals.scope : local);
+  const local = createScope(createDependencyGate(features, matchedIds), state);
+  const scopeOf = (id: string) => (rt.globalIds.has(id) ? rt.globals : local);
 
   const loaded = await loadChunks(
     sortedFeatures,
@@ -563,7 +620,6 @@ async function runMount(
     prunedEdges,
     scopeOf,
     warn,
-    orderBase,
   );
 
   const ctx: ExecutionContext = { knownIds, prunedEdges, scopeOf, warn, root };
@@ -573,43 +629,90 @@ async function runMount(
   await dispatchWaves(waves, ctx, globalTimeout);
 }
 
+function disposeMount(rt: RuntimeState, state: MountState): Promise<void> {
+  if (!state.disposing) {
+    state.closed = true;
+    state.disposing = withCap(
+      teardownRecords(state.records.splice(0), rt.warn),
+      rt.disposeTimeout,
+    );
+    rt.pendingDispose = Promise.all([rt.pendingDispose, state.disposing]);
+  }
+  return state.disposing;
+}
+
+async function destroyRuntime(rt: RuntimeState): Promise<void> {
+  const { current, globals } = rt;
+  globals.owner.closed = true;
+  current.closed = true;
+  // Abort first: every page and global signal, before any teardown runs.
+  for (const record of [...current.records, ...globals.owner.records]) {
+    record.controller.abort();
+  }
+  // The first mount shares the globals' topological order, so its records are torn
+  // down with them, and its dispose() settles with that pass.
+  if (current.withGlobals && !current.disposing) {
+    const records = current.records.splice(0);
+    records.push(...globals.owner.records.splice(0));
+    current.disposing = withCap(
+      teardownRecords(records, rt.warn),
+      rt.disposeTimeout,
+    );
+    return current.disposing;
+  }
+  // A later mount, and any earlier mount still disposing, finish before any global.
+  await disposeMount(rt, current);
+  await rt.pendingDispose;
+  await teardownRecords(globals.owner.records.splice(0), rt.warn);
+}
+
 export function createFeatureRuntime(
   features: FeatureMeta[],
   options?: RuntimeOptions,
 ): FeatureRuntime {
   const warn = makeWarn(options?.logging);
-  const timeout = resolveTimeout(options?.timeout, warn);
-  // Globals run on the first mount only; every later mount matches page features alone.
-  let candidates = features;
-  const globals = createGlobals(features);
-  // Records of the latest mount; `destroy()` tears it down with the globals.
-  let current: FeatureRecord[] = [];
-  // Orders are topological indexes within one mount. Only the first mount runs
-  // globals, so later mounts are offset past it: their page features, which may
-  // depend on globals, are torn down before any global.
-  let orderBase = 0;
+  const rt: RuntimeState = {
+    features,
+    globalIds: new Set(features.filter((f) => f.global).map((f) => f.id)),
+    globals: createScope(createDependencyGate([], new Set()), {
+      records: [],
+      closed: false,
+    }),
+    warn,
+    timeout: resolveTimeout(options?.timeout, warn),
+    disposeTimeout: resolveTimeout(
+      options?.disposeTimeout,
+      warn,
+      DEFAULT_DISPOSE_TIMEOUT_MS,
+      '[runtime] Invalid disposeTimeout',
+    ),
+    mounted: false,
+    current: { root: document, records: [], closed: false, withGlobals: false },
+    pendingDispose: Promise.resolve(),
+  };
 
   function mount(mountOptions?: MountOptions): MountHandle {
-    const root = mountOptions?.root ?? document;
-    const records: FeatureRecord[] = [];
-    current = records;
-    const ready = runMount(
-      features,
-      globals,
-      candidates,
-      root,
-      records,
-      warn,
-      timeout,
-      orderBase,
-    );
-    candidates = features.filter((f) => !f.global);
-    orderBase = features.length;
-    return { ready, dispose: () => teardownRecords([records], warn) };
+    if (rt.destroying) {
+      warn('[runtime] mount() called after destroy(): ignoring');
+      return { ready: Promise.resolve(), dispose: () => Promise.resolve() };
+    }
+    const state: MountState = {
+      root: mountOptions?.root ?? document,
+      records: [],
+      closed: false,
+      withGlobals: !rt.mounted,
+    };
+    rt.mounted = true;
+    rt.current = state;
+    return {
+      ready: runMount(rt, state),
+      dispose: () => disposeMount(rt, state),
+    };
   }
 
   function destroy(): Promise<void> {
-    return teardownRecords([current, globals.scope.records], warn);
+    rt.destroying ??= withCap(destroyRuntime(rt), rt.disposeTimeout);
+    return rt.destroying;
   }
 
   return { mount, destroy };

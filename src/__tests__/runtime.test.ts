@@ -35,10 +35,19 @@ function makeLoadable(
   };
 }
 
+function deferred() {
+  let resolve!: () => void;
+  const promise = new Promise<void>((r) => {
+    resolve = r;
+  });
+  return { promise, resolve };
+}
+
 const $ = (selector: string) => document.querySelector(selector)!;
 const idOf = (root: Document | Element) => (root as Element).id ?? 'doc';
 
 afterEach(() => {
+  vi.useRealTimers();
   vi.restoreAllMocks();
   document.body.innerHTML = '';
 });
@@ -433,6 +442,401 @@ describe('dispose and destroy', () => {
       await runtime.destroy();
       expect(warn).not.toHaveBeenCalled();
     });
+  });
+});
+
+describe('dispose hardening', () => {
+  it('aborts every signal before any cleanup or onDestroy (AC-11)', async () => {
+    document.body.innerHTML = '<p class="p"></p>';
+    const signals: AbortSignal[] = [];
+    const seen: boolean[] = [];
+    const record = () => {
+      seen.push(...signals.map((s) => s.aborted));
+    };
+    const feature = (id: string, dependencies: string[] = []) =>
+      makeLoadable(id, {
+        selectors: ['.p'],
+        dependencies,
+        onSetup: (_s, { signal }) => {
+          signals.push(signal);
+        },
+        onEach: () => record,
+        onDestroy: record,
+      });
+    const handle = createFeatureRuntime([
+      feature('a'),
+      feature('b', ['a']),
+    ]).mount();
+    await handle.ready;
+    await handle.dispose();
+    expect(seen).toEqual([true, true, true, true, true, true, true, true]);
+  });
+
+  it('tears dependents down first, in parallel within a level (AC-12)', async () => {
+    document.body.innerHTML = '<p class="p"></p>';
+    const log: string[] = [];
+    const slow = deferred();
+    const feature = (id: string, dependencies: string[] = []) =>
+      makeLoadable(id, {
+        selectors: ['.p'],
+        dependencies,
+        onDestroy: async () => {
+          log.push(`${id}:start`);
+          if (id === 'a') await slow.promise;
+          log.push(`${id}:end`);
+        },
+      });
+    const handle = createFeatureRuntime([
+      feature('a'),
+      feature('b'),
+      feature('c', ['a', 'b']),
+    ]).mount();
+    await handle.ready;
+    const disposed = handle.dispose();
+    await new Promise((r) => setTimeout(r, 0));
+    expect(log).toEqual(['c:start', 'c:end', 'a:start', 'b:start', 'b:end']);
+    slow.resolve();
+    await disposed;
+    expect(log.at(-1)).toBe('a:end');
+  });
+
+  it('resolves dispose and destroy at disposeTimeout when onDestroy never settles (AC-13)', async () => {
+    vi.useFakeTimers();
+    const warn = vi.spyOn(console, 'warn').mockImplementation(noop);
+    document.body.innerHTML = '<p class="p"></p>';
+    const never = () => new Promise<void>(noop);
+    const features = [
+      makeLoadable('g', { global: true, onDestroy: never }),
+      makeLoadable('p', { selectors: ['.p'], onDestroy: never }),
+    ];
+    const settlesAfter = async (promise: Promise<void>, ms: number) => {
+      let settled = false;
+      void promise.then(() => {
+        settled = true;
+      });
+      await vi.advanceTimersByTimeAsync(ms - 1);
+      expect(settled).toBe(false);
+      await vi.advanceTimersByTimeAsync(1);
+      expect(settled).toBe(true);
+    };
+    const handle = createFeatureRuntime(features).mount();
+    await handle.ready;
+    await settlesAfter(handle.dispose(), 3000);
+    const capped = createFeatureRuntime(features, { disposeTimeout: 50 });
+    await capped.mount().ready;
+    await settlesAfter(capped.destroy(), 50);
+    createFeatureRuntime(features, { disposeTimeout: -1 });
+    expect(warn).toHaveBeenCalledWith(
+      '[runtime] Invalid disposeTimeout (-1ms) — using default 3000ms',
+    );
+  });
+
+  it('runs teardown once and returns the same promise on repeated calls (AC-14)', async () => {
+    document.body.innerHTML = '<p class="p"></p>';
+    const log: string[] = [];
+    const runtime = createFeatureRuntime([
+      makeLoadable('g', { global: true, onDestroy: () => void log.push('g') }),
+      makeLoadable('p', {
+        selectors: ['.p'],
+        onEach: () => () => void log.push('cleanup'),
+        onDestroy: () => void log.push('p'),
+      }),
+    ]);
+    const handle = runtime.mount();
+    await handle.ready;
+    const disposed = handle.dispose();
+    expect(handle.dispose()).toBe(disposed);
+    const destroyed = runtime.destroy();
+    expect(runtime.destroy()).toBe(destroyed);
+    await Promise.all([disposed, destroyed, handle.dispose()]);
+    expect(log).toEqual(['cleanup', 'p', 'g']);
+  });
+
+  it('destroy aborts first and runs each global onDestroy once, after the last page (AC-15)', async () => {
+    document.body.innerHTML =
+      '<div id="a"><p class="p"></p></div><div id="b"><p class="p"></p></div>';
+    const log: string[] = [];
+    let globalSignal: AbortSignal | undefined;
+    const runtime = createFeatureRuntime([
+      makeLoadable('g', {
+        global: true,
+        onSetup: (_s, { signal }) => {
+          globalSignal = signal;
+        },
+        onDestroy: () => void log.push('g'),
+      }),
+      makeLoadable('p', {
+        selectors: ['.p'],
+        onDestroy: ({ root }) =>
+          void log.push(`p:${idOf(root)}:${globalSignal!.aborted}`),
+      }),
+    ]);
+    const a = runtime.mount({ root: $('#a') });
+    await a.ready;
+    await a.dispose();
+    await runtime.mount({ root: $('#b') }).ready;
+    await runtime.destroy();
+    expect(log).toEqual(['p:a:false', 'p:b:true', 'g']);
+  });
+
+  it('dispose before ready aborts in-flight hooks, never starts the rest, tears down set-up ones (AC-16)', async () => {
+    document.body.innerHTML = '<p class="p"></p>';
+    const log: string[] = [];
+    const setup = deferred();
+    let signal: AbortSignal | undefined;
+    const handle = createFeatureRuntime([
+      makeLoadable('done', {
+        selectors: ['.p'],
+        onDestroy: () => void log.push('done:destroy'),
+      }),
+      makeLoadable('slow', {
+        selectors: ['.p'],
+        onSetup: async (_s, ctx) => {
+          signal = ctx.signal;
+          await setup.promise;
+        },
+        onEach: () => void log.push('slow:each'),
+      }),
+      makeLoadable('later', {
+        selectors: ['.p'],
+        priority: 1,
+        onSetup: () => void log.push('later:setup'),
+      }),
+    ]).mount();
+    await vi.waitFor(() => expect(signal).toBeDefined());
+    await handle.dispose();
+    expect(signal!.aborted).toBe(true);
+    setup.resolve();
+    await expect(handle.ready).resolves.toBeUndefined();
+    expect(log).toEqual(['done:destroy']);
+  });
+
+  it('runs a cleanup returned after its mount was disposed immediately (AC-17, edge 14)', async () => {
+    document.body.innerHTML = '<p class="p"></p>';
+    const each = deferred();
+    const cleanup = vi.fn();
+    let started = false;
+    const handle = createFeatureRuntime([
+      makeLoadable('p', {
+        selectors: ['.p'],
+        onEach: async () => {
+          started = true;
+          await each.promise;
+          return cleanup;
+        },
+      }),
+    ]).mount();
+    await vi.waitFor(() => expect(started).toBe(true));
+    await handle.dispose();
+    expect(cleanup).not.toHaveBeenCalled();
+    each.resolve();
+    await handle.ready;
+    expect(cleanup).toHaveBeenCalledOnce();
+  });
+
+  it('destroy during the first mount aborts running globals and never starts later ones (edge 14)', async () => {
+    const setup = deferred();
+    let signal: AbortSignal | undefined;
+    const g2 = vi.fn();
+    const runtime = createFeatureRuntime([
+      makeLoadable('g1', {
+        global: true,
+        onSetup: async (_s, ctx) => {
+          signal = ctx.signal;
+          await setup.promise;
+        },
+      }),
+      makeLoadable('g2', { global: true, priority: 1, onSetup: g2 }),
+    ]);
+    const handle = runtime.mount();
+    await vi.waitFor(() => expect(signal).toBeDefined());
+    await runtime.destroy();
+    expect(signal!.aborted).toBe(true);
+    setup.resolve();
+    await handle.ready;
+    expect(g2).not.toHaveBeenCalled();
+  });
+
+  it('starts the next mount only after the previous capped dispose settles (AC-18)', async () => {
+    vi.useFakeTimers();
+    document.body.innerHTML = '<p class="p"></p>';
+    const log: string[] = [];
+    const runtime = createFeatureRuntime([
+      makeLoadable('p', {
+        selectors: ['.p'],
+        onSetup: () => void log.push('setup'),
+        onDestroy: () =>
+          new Promise<void>((resolve) => {
+            setTimeout(() => {
+              log.push('destroyed');
+              resolve();
+            }, 500);
+          }),
+      }),
+    ]);
+    const first = runtime.mount();
+    await first.ready;
+    void first.dispose();
+    const next = runtime.mount();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(log).toEqual(['setup']);
+    await vi.advanceTimersByTimeAsync(499);
+    expect(log).toEqual(['setup']);
+    await vi.advanceTimersByTimeAsync(1);
+    await next.ready;
+    expect(log).toEqual(['setup', 'destroyed', 'setup']);
+  });
+
+  it('waits for a dispose of the previous mount called right after mount() (AC-18)', async () => {
+    document.body.innerHTML = '<p class="p"></p>';
+    const log: string[] = [];
+    const gate = deferred();
+    const runtime = createFeatureRuntime([
+      makeLoadable('p', {
+        selectors: ['.p'],
+        onSetup: () => void log.push('setup'),
+        onDestroy: async () => {
+          log.push('destroy-start');
+          await gate.promise;
+          log.push('destroy-end');
+        },
+      }),
+    ]);
+    const first = runtime.mount();
+    await first.ready;
+    const next = runtime.mount();
+    void first.dispose();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(log).toEqual(['setup', 'destroy-start']);
+    gate.resolve();
+    await next.ready;
+    expect(log).toEqual(['setup', 'destroy-start', 'destroy-end', 'setup']);
+  });
+
+  it('disposeTimeout 0 disables the cap, and the cap timer is cleared', async () => {
+    vi.useFakeTimers();
+    document.body.innerHTML = '<p class="p"></p>';
+    const slow = () =>
+      new Promise<void>((resolve) => {
+        setTimeout(resolve, 5000);
+      });
+    const features = [
+      makeLoadable('p', { selectors: ['.p'], onDestroy: slow }),
+    ];
+    const uncapped = createFeatureRuntime(features, { disposeTimeout: 0 });
+    const handle = uncapped.mount();
+    await handle.ready;
+    let settled = false;
+    void handle.dispose().then(() => {
+      settled = true;
+    });
+    await vi.advanceTimersByTimeAsync(4999);
+    expect(settled).toBe(false);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(settled).toBe(true);
+    const capped = createFeatureRuntime([makeLoadable('q', { global: true })]);
+    await capped.mount().ready;
+    await capped.destroy();
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it('a first-mount dispose after destroy settles with the shared teardown pass', async () => {
+    document.body.innerHTML = '<p class="p"></p>';
+    const log: string[] = [];
+    const gate = deferred();
+    const runtime = createFeatureRuntime([
+      makeLoadable('g', { global: true, onDestroy: () => void log.push('g') }),
+      makeLoadable('p', {
+        selectors: ['.p'],
+        dependencies: ['g'],
+        onDestroy: async () => {
+          await gate.promise;
+          log.push('p');
+        },
+      }),
+    ]);
+    const handle = runtime.mount();
+    await handle.ready;
+    const destroyed = runtime.destroy();
+    let disposed = false;
+    void handle.dispose().then(() => {
+      disposed = true;
+    });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(disposed).toBe(false);
+    gate.resolve();
+    await destroyed;
+    expect(disposed).toBe(true);
+    expect(log).toEqual(['p', 'g']);
+  });
+
+  it('destroy waits for an earlier mount still disposing before tearing down globals (AC-15)', async () => {
+    document.body.innerHTML = '<p class="p"></p>';
+    const log: string[] = [];
+    const gate = deferred();
+    const runtime = createFeatureRuntime([
+      makeLoadable('g', { global: true, onDestroy: () => void log.push('g') }),
+      makeLoadable('p', {
+        selectors: ['.p'],
+        dependencies: ['g'],
+        onDestroy: async () => {
+          await gate.promise;
+          log.push('p');
+        },
+      }),
+    ]);
+    const first = runtime.mount();
+    await first.ready;
+    void first.dispose();
+    runtime.mount();
+    const destroyed = runtime.destroy();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(log).toEqual([]);
+    gate.resolve();
+    await destroyed;
+    expect(log).toEqual(['p', 'g']);
+  });
+
+  it('mount after destroy warns and returns an inert handle (AC-19)', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(noop);
+    const onSetup = vi.fn();
+    const runtime = createFeatureRuntime([
+      makeLoadable('g', { global: true, onSetup }),
+    ]);
+    await runtime.destroy();
+    const handle = runtime.mount();
+    await expect(handle.ready).resolves.toBeUndefined();
+    await expect(handle.dispose()).resolves.toBeUndefined();
+    expect(onSetup).not.toHaveBeenCalled();
+    expect(warn).toHaveBeenCalledWith(
+      '[runtime] mount() called after destroy(): ignoring',
+    );
+  });
+
+  it('skips onDestroy when onSetup failed and keeps it after a later failure (edges 11, 12)', async () => {
+    vi.spyOn(console, 'warn').mockImplementation(noop);
+    document.body.innerHTML = '<p class="p"></p>';
+    const log: string[] = [];
+    const handle = createFeatureRuntime([
+      makeLoadable('s', {
+        selectors: ['.p'],
+        onSetup: () => {
+          throw new Error('setup');
+        },
+        onDestroy: () => void log.push('s:destroy'),
+      }),
+      makeLoadable('r', {
+        selectors: ['.p'],
+        onEach: () => () => void log.push('r:cleanup'),
+        onReady: () => {
+          throw new Error('ready');
+        },
+        onDestroy: () => void log.push('r:destroy'),
+      }),
+    ]).mount();
+    await handle.ready;
+    await handle.dispose();
+    expect(log).toEqual(['r:cleanup', 'r:destroy']);
   });
 });
 
