@@ -1,9 +1,18 @@
 import { describe, it, expect } from 'vitest';
 import { defineFeature } from '../define-feature.ts';
-import type { FeatureDescriptorInput } from '../types.ts';
+import type {
+  FeatureDescriptorInput,
+  OnDestroyContext as OnDestroyContextFromTypes,
+  OnDestroyFn as OnDestroyFnFromTypes,
+  OnEachCleanup as OnEachCleanupFromTypes,
+  OnEachFn as OnEachFnFromTypes,
+} from '../types.ts';
 // AC-4: OnSetupContext and the updated OnSetupFn must be re-exported from the package entry point.
 import type {
   FeatureEachContext,
+  OnDestroyContext,
+  OnDestroyFn,
+  OnEachCleanup,
   OnReadyContext,
   OnReadyFn,
   OnSetupContext,
@@ -43,6 +52,7 @@ describe('defineFeature', () => {
       const onSetup = () => ({ data: 1 });
       const onEach = () => {};
       const onReady = () => {};
+      const onDestroy = () => {};
 
       const result = defineFeature({
         id: 'full-feature',
@@ -55,6 +65,7 @@ describe('defineFeature', () => {
         onSetup,
         onEach,
         onReady,
+        onDestroy,
       });
 
       expect(result.id).toBe('full-feature');
@@ -67,11 +78,22 @@ describe('defineFeature', () => {
       expect(result.onSetup).toBe(onSetup);
       expect(result.onEach).toBe(onEach);
       expect(result.onReady).toBe(onReady);
+      // #137 AC-2: onDestroy is forwarded by reference.
+      expect(result.onDestroy).toBe(onDestroy);
     });
 
     it('accepts global feature with onSetup only', () => {
       const result = defineFeature(minimal({ global: true }));
       expect(result.global).toBe(true);
+    });
+
+    it('accepts onDestroy on a global feature (#137 AC-6)', () => {
+      const onDestroy = () => {};
+      const result = defineFeature(
+        minimal({ selectors: [], global: true, onDestroy }),
+      );
+      expect(result.global).toBe(true);
+      expect(result.onDestroy).toBe(onDestroy);
     });
 
     it('accepts empty selectors array for global features', () => {
@@ -194,6 +216,27 @@ describe('defineFeature', () => {
       ).toThrow('[defineFeature] expose must be a function');
     });
 
+    it.each([
+      ['a number', 42],
+      ['an object', {}],
+    ])('throws when onDestroy is %s (#137 AC-4)', (_label, value) => {
+      expect(() =>
+        defineFeature(
+          minimal({
+            onDestroy: value as unknown as FeatureDescriptorInput['onDestroy'],
+          }),
+        ),
+      ).toThrow('[defineFeature] onDestroy must be a function');
+    });
+
+    it('rejects a descriptor that only declares onDestroy (#137 AC-5)', () => {
+      expect(() =>
+        defineFeature(minimal({ onSetup: undefined, onDestroy: noop })),
+      ).toThrow(
+        '[defineFeature] at least one of onSetup or onEach is required',
+      );
+    });
+
     it('throws when dependencies is not an array of strings', () => {
       expect(() =>
         defineFeature(minimal({ dependencies: [1, 2] as unknown as string[] })),
@@ -287,6 +330,18 @@ describe('defineFeature', () => {
       expect(result.onEach).toBeNull();
       expect(result.onReady).toBeNull();
     });
+
+    it.each([
+      ['omitted', {}],
+      ['undefined', { onDestroy: undefined }],
+      ['null', { onDestroy: null }],
+    ] as const)(
+      'normalizes onDestroy to null when %s (#137 AC-3)',
+      (_label, overrides) => {
+        const result = defineFeature(minimal(overrides));
+        expect(result.onDestroy).toBeNull();
+      },
+    );
 
     it('defaults onSetup to null when not provided', () => {
       const result = defineFeature(
@@ -432,6 +487,83 @@ describe('defineFeature', () => {
         }),
       );
       expect(result.id).toBe('test-feature');
+    });
+  });
+  describe('onDestroy + onEach cleanup types', () => {
+    it('accepts an optional onDestroy receiving { ctx, signal, root } (#137 AC-1)', () => {
+      const destroy: OnDestroyFnFromTypes = ({ ctx, signal, root }) => {
+        void [ctx, signal.aborted, root.nodeType];
+      };
+      const context: OnDestroyContextFromTypes = {
+        ctx: undefined,
+        signal: new AbortController().signal,
+        root: document,
+      };
+      // @ts-expect-error — root is required on the onDestroy context
+      const missingRoot: OnDestroyContextFromTypes = {
+        ctx: undefined,
+        signal: new AbortController().signal,
+      };
+      const withFn: FeatureDescriptorInput = minimal({ onDestroy: destroy });
+      const withNull: FeatureDescriptorInput = minimal({ onDestroy: null });
+      const without: FeatureDescriptorInput = minimal();
+      expect([withFn.onDestroy, withNull.onDestroy, without.onDestroy]).toEqual(
+        [destroy, null, undefined],
+      );
+      expect([context, missingRoot]).toHaveLength(2);
+    });
+    it('lets onEach return nothing, a sync or async cleanup, or a Promise of either (#137 AC-7)', () => {
+      const cleanup: OnEachCleanupFromTypes = () => {};
+      const asyncCleanup: OnEachCleanupFromTypes = async () => {};
+      const returnsNothing: OnEachFnFromTypes = () => {};
+      const returnsCleanup: OnEachFnFromTypes = () => cleanup;
+      const returnsAsyncCleanup: OnEachFnFromTypes = () => asyncCleanup;
+      const resolvesNothing: OnEachFnFromTypes = async () => {};
+      const resolvesCleanup: OnEachFnFromTypes = async () => cleanup;
+      // @ts-expect-error — a number is not a cleanup
+      const returnsNumber: OnEachFnFromTypes = () => 42;
+      // @ts-expect-error — a non-function object is not a cleanup
+      const returnsObject: OnEachFnFromTypes = () => ({ kill: () => {} });
+      // @ts-expect-error — a Promise of a non-function is not a cleanup
+      const resolvesNumber: OnEachFnFromTypes = async () => 42;
+      expect([
+        returnsNothing,
+        returnsCleanup,
+        returnsAsyncCleanup,
+        resolvesNothing,
+        resolvesCleanup,
+        returnsNumber,
+        returnsObject,
+        resolvesNumber,
+      ]).toHaveLength(8);
+    });
+    it('accepts cleanups and onDestroy arrows that return a value, such as kill() or Map#delete', () => {
+      class Tween {
+        kill(): this {
+          return this;
+        }
+      }
+      const tween = new Tween();
+      const registry = new Map<Element, Tween>();
+      const killsTween: OnEachFnFromTypes = () => () => tween.kill();
+      const deletesEntry: OnEachFnFromTypes = ({ el }) => () =>
+        registry.delete(el);
+      const destroyKills: OnDestroyFnFromTypes = () => tween.kill();
+      expect([killsTween, deletesEntry, destroyKills]).toHaveLength(3);
+    });
+    it('exports OnDestroyContext, OnDestroyFn and OnEachCleanup from the package entry point (#137 AC-10)', () => {
+      const context: OnDestroyContext = {
+        ctx: undefined,
+        signal: new AbortController().signal,
+        root: document,
+      };
+      const destroy: OnDestroyFn = () => {};
+      const cleanup: OnEachCleanup = () => {};
+      expect([context.root, typeof destroy, typeof cleanup]).toEqual([
+        document,
+        'function',
+        'function',
+      ]);
     });
   });
 });

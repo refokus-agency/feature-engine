@@ -16,6 +16,9 @@ import type { FeatureDescriptor, FeatureDescriptorInput } from './types.ts';
  *   the `onSetup` return value. Post-processing (e.g. `ScrollTrigger.refresh`).
  * - `signal` is one `AbortSignal` per feature, aborted when the feature stops being alive
  *   (timeout, a hook throws, or `onSetup` returns `false`) — never on success.
+ * - `onEach` may return (or resolve to) a cleanup function for its element, and `onDestroy`
+ *   receives `{ ctx, signal, root }` for feature-wide teardown. Both run only under
+ *   `createFeatureRuntime`; `loadFeatures` never invokes them.
  *
  * At least one of `onSetup` or `onEach` is required.
  *
@@ -30,6 +33,7 @@ import type { FeatureDescriptor, FeatureDescriptorInput } from './types.ts';
  * @param descriptor.onSetup - Runs once with selectors. Return `false` to abort.
  * @param descriptor.onEach - Runs per matched element. Not allowed with `global: true`.
  * @param descriptor.onReady - Runs after all `onEach` calls.
+ * @param descriptor.onDestroy - Feature-wide teardown. Never invoked by `loadFeatures`.
  * @returns Frozen descriptor with normalized defaults: `global` → `false`, `dependencies` → deduped,
  *   `enabled` → `true`, `timeout` → `null`, hooks → `null`.
  * @throws If `id` is missing or not a string.
@@ -37,7 +41,7 @@ import type { FeatureDescriptor, FeatureDescriptorInput } from './types.ts';
  * @throws If `priority` is not a finite number.
  * @throws If neither `onSetup` nor `onEach` are provided.
  * @throws If `global: true` is combined with `onEach`.
- * @throws If a hook is truthy but not a function.
+ * @throws If a hook (`onSetup`, `onEach`, `onReady`, `expose`, `onDestroy`) is truthy but not a function.
  * @throws If `dependencies` is not a `string[]`, `enabled` is not a boolean, or `timeout` is not a positive number.
  */
 export function defineFeature(
@@ -94,6 +98,10 @@ export function defineFeature(
     throw new Error('[defineFeature] expose must be a function');
   }
 
+  if (descriptor.onDestroy && typeof descriptor.onDestroy !== 'function') {
+    throw new Error('[defineFeature] onDestroy must be a function');
+  }
+
   if (
     descriptor.dependencies !== undefined &&
     (!Array.isArray(descriptor.dependencies) ||
@@ -129,5 +137,6 @@ export function defineFeature(
     onEach: descriptor.onEach || null,
     onReady: descriptor.onReady || null,
     expose: descriptor.expose || null,
+    onDestroy: descriptor.onDestroy || null,
   });
 }

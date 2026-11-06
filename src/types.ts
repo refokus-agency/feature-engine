@@ -25,8 +25,14 @@ export type OnSetupFn = (
   context: OnSetupContext,
 ) => unknown | false | Promise<unknown | false>;
 
-/** Per-element callback — runs once for each element matching the feature selectors. */
-export type OnEachFn = (ctx: FeatureEachContext) => void | Promise<void>;
+/** Per-element cleanup returned from `onEach`. Its return value (or resolved value) is ignored,
+ *  so concise arrows such as `() => tween.kill()` are accepted. */
+export type OnEachCleanup = () => unknown;
+
+/** Per-element callback — runs once for each element matching the feature selectors. May return (or resolve to) a cleanup for that element. */
+export type OnEachFn = (
+  ctx: FeatureEachContext,
+) => void | OnEachCleanup | Promise<void | OnEachCleanup>;
 
 /** Context object passed to `onReady`. */
 export interface OnReadyContext {
@@ -40,6 +46,22 @@ export interface OnReadyContext {
 
 /** Ready callback — runs after all elements have been processed. Implementations that ignore the context stay valid. */
 export type OnReadyFn = (context: OnReadyContext) => void | Promise<void>;
+
+/** Context object passed to `onDestroy`. */
+export interface OnDestroyContext {
+  /** Value returned by `onSetup`; `undefined` when `onSetup` is absent. May be `undefined`,
+   *  `false` or partially built if the feature did not complete its lifecycle, so guard reads. */
+  ctx: unknown;
+  /** The feature's per-run signal. Always already aborted when `onDestroy` runs (dispose aborts
+   *  first), so do not register new work on it. */
+  signal: AbortSignal;
+  /** Root the feature was mounted into; `document` when no root option was given. */
+  root: Document | Element;
+}
+
+/** Feature-wide teardown. Invoked only by `createFeatureRuntime`, never by `loadFeatures`.
+ *  Its return value (or resolved value) is ignored. */
+export type OnDestroyFn = (context: OnDestroyContext) => unknown;
 
 /** Public-API projection called after the lifecycle completes; its return value is
  *  exposed to dependents. `ctx` is `any` so callers can annotate it with the concrete
@@ -59,6 +81,7 @@ export interface FeatureDescriptor {
   onEach: OnEachFn | null;
   onReady: OnReadyFn | null;
   expose: ExposeFn | null;
+  onDestroy: OnDestroyFn | null;
 }
 
 /** User-facing input shape for `defineFeature()` — most fields are optional. */
@@ -74,6 +97,7 @@ export interface FeatureDescriptorInput {
   onEach?: OnEachFn | null;
   onReady?: OnReadyFn | null;
   expose?: ExposeFn | null;
+  onDestroy?: OnDestroyFn | null;
 }
 
 /** Static metadata with a lazy loader, used by `loadFeatures()` at runtime. */
