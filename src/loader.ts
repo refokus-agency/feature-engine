@@ -6,6 +6,8 @@ import type {
   OnEachCleanup,
   MountHandle,
   MountOptions,
+  NavigateEvent,
+  NavigateHandler,
   NavigationAdapter,
   NavigationHandlers,
   NavigationInfo,
@@ -673,42 +675,96 @@ interface NavigationState {
   handle: MountHandle | null;
   lastRoot: Element | null;
   lastNav: NavigationInfo | null;
+  controller: AbortController | null;
+  cleanups: Array<() => void>;
 }
 
 interface NavigationConnection {
-  /** Closes the port and disconnects the adapter. */
+  /** Aborts the signal, runs pending cleanups and disconnects the adapter. */
   teardown(): void;
 }
 
-// Starts the page's dispose without awaiting it.
-function leaveCurrent(state: NavigationState): void {
+// Calls each handler in order and collects function results into `cleanups`; anything else is ignored.
+// A handler may leave the page (leave, enter, cancel or destroy): the signal is then aborted, the
+// remaining handlers are skipped and a cleanup returned after the leave runs at once.
+function startHandlers(
+  event: NavigateEvent,
+  handlers: NavigateHandler[],
+  cleanups: Array<() => void>,
+  warn: LogFn,
+): void {
+  for (const handler of handlers) {
+    if (event.signal.aborted) return;
+    try {
+      const cleanup = handler(event);
+      if (typeof cleanup !== 'function') continue;
+      if (event.signal.aborted) runCleanups([cleanup], warn);
+      else cleanups.push(cleanup);
+    } catch (err) {
+      warn('[runtime] onNavigate handler failed:', err);
+    }
+  }
+}
+
+function runCleanups(cleanups: Array<() => void>, warn: LogFn): void {
+  for (const cleanup of cleanups) {
+    try {
+      cleanup();
+    } catch (err) {
+      warn('[runtime] onNavigate cleanup failed:', err);
+    }
+  }
+}
+
+// Aborts the navigation signal, starts the dispose without awaiting it, then runs the cleanups.
+function leaveCurrent(state: NavigationState, warn: LogFn): void {
+  state.controller?.abort();
   void state.handle?.dispose();
   state.handle = null;
+  state.controller = null;
+  runCleanups(state.cleanups.splice(0), warn);
 }
 
 function connectNavigation(
   rt: RuntimeState,
   mount: (options?: MountOptions) => MountHandle,
   navigation: NavigationAdapter,
+  onNavigate: NavigateHandler[],
 ): NavigationConnection {
   const state: NavigationState = {
     handle: null,
     lastRoot: null,
     lastNav: null,
+    controller: null,
+    cleanups: [],
   };
   // Set when teardown starts, so calls made during or after destroy() are ignored.
   let closed = false;
   const enterRoot = (root: Element, nav: NavigationInfo): void => {
-    leaveCurrent(state);
-    // The dispose aborts feature signals synchronously, and a listener may have destroyed the runtime.
+    leaveCurrent(state, rt.warn);
+    // A cleanup may have entered or cancelled into another page: leave it too, so one page is live.
+    while (state.handle) leaveCurrent(state, rt.warn);
+    // A cleanup may have destroyed the runtime: mount nothing and run no handler.
     if (closed) return;
-    state.handle = mount({ root });
+    const handle = mount({ root });
+    const controller = new AbortController();
+    state.handle = handle;
+    state.controller = controller;
     state.lastRoot = root;
     state.lastNav = nav;
+    // Assigned before the handlers run, so a leave from inside a handler runs what was collected.
+    const cleanups: Array<() => void> = [];
+    state.cleanups = cleanups;
+    startHandlers(
+      { root, nav, signal: controller.signal, ready: handle.ready },
+      onNavigate,
+      cleanups,
+      rt.warn,
+    );
   };
   const handlers: NavigationHandlers = {
     leave() {
-      if (!closed) leaveCurrent(state);
+      if (!closed) leaveCurrent(state, rt.warn);
     },
     enter(root, nav) {
       if (!closed) enterRoot(root, nav);
@@ -725,6 +781,8 @@ function connectNavigation(
     // Never disposes the handle: destroyRuntime tears the first mount down with the globals.
     teardown() {
       closed = true;
+      state.controller?.abort();
+      runCleanups(state.cleanups.splice(0), rt.warn);
       try {
         disconnect();
       } catch (err) {
@@ -789,7 +847,12 @@ export function createFeatureRuntime(
   let navigation: NavigationConnection | null = null;
   if (options?.navigation) {
     try {
-      navigation = connectNavigation(rt, mount, options.navigation);
+      navigation = connectNavigation(
+        rt,
+        mount,
+        options.navigation,
+        options.onNavigate ?? [],
+      );
     } catch (err) {
       // connect() threw: tear down whatever it mounted, since the caller never gets the runtime.
       void destroy();

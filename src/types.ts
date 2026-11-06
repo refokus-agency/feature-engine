@@ -125,6 +125,8 @@ export interface RuntimeOptions {
   disposeTimeout?: number;
   /** Port that drives mount and dispose on page transitions. Without it the runtime is driven manually. */
   navigation?: NavigationAdapter;
+  /** Called in order after each navigation mount starts. Ignored without `navigation`. */
+  onNavigate?: NavigateHandler[];
 }
 
 /** What the adapter knows about one navigation. */
@@ -149,6 +151,19 @@ export interface NavigationAdapter {
   /** Called once, when the runtime is created. Returns the disconnect function, called by `destroy()`. */
   connect(handlers: NavigationHandlers): () => void;
 }
+
+/** Argument of an `onNavigate` handler. */
+export interface NavigateEvent {
+  root: Element;
+  nav: NavigationInfo;
+  /** Aborted on the next leave, on a replacing enter, and on destroy. */
+  signal: AbortSignal;
+  /** The mount handle's `ready`. */
+  ready: Promise<void>;
+}
+
+/** May return a cleanup, run on the next leave or on `destroy()`. Any other return value is ignored. */
+export type NavigateHandler = (event: NavigateEvent) => void | (() => void);
 
 /** Options for `FeatureRuntime.mount()`. */
 export interface MountOptions {
