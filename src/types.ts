@@ -123,6 +123,31 @@ export interface RuntimeOptions {
   logging?: boolean;
   /** Cap in ms on one `dispose()` or `destroy()`, which resolves when it is reached. `0` disables it. Defaults to 3000. */
   disposeTimeout?: number;
+  /** Port that drives mount and dispose on page transitions. Without it the runtime is driven manually. */
+  navigation?: NavigationAdapter;
+}
+
+/** What the adapter knows about one navigation. */
+export interface NavigationInfo {
+  initial: boolean;
+  url?: string;
+  html?: string;
+}
+
+/** Callbacks the runtime hands to `NavigationAdapter.connect()`. None of them is awaited. */
+export interface NavigationHandlers {
+  /** Disposes the current page. */
+  leave(): void;
+  /** Mounts the incoming root, leaving the current page first if it is still mounted. */
+  enter(root: Element, nav: NavigationInfo): void;
+  /** The navigation was aborted after `leave`: remounts the last entered root. */
+  cancel(): void;
+}
+
+/** Port between `createFeatureRuntime()` and a page-transition library. */
+export interface NavigationAdapter {
+  /** Called once, when the runtime is created. Returns the disconnect function, called by `destroy()`. */
+  connect(handlers: NavigationHandlers): () => void;
 }
 
 /** Options for `FeatureRuntime.mount()`. */
