@@ -7,6 +7,8 @@ export type {
   LoaderOptions,
   MountHandle,
   MountOptions,
+  NavigateEvent,
+  NavigateHandler,
   NavigationAdapter,
   NavigationHandlers,
   NavigationInfo,
