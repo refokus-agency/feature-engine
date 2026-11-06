@@ -3,6 +3,7 @@ import type {
   FeatureMeta,
   FeatureRuntime,
   LoaderOptions,
+  OnEachCleanup,
   MountHandle,
   MountOptions,
   RuntimeOptions,
@@ -22,6 +23,21 @@ interface LoadedFeature {
   meta: FeatureMeta;
   descriptor: FeatureDescriptor;
   validDeps: string[];
+  // Index in the topological order; teardown runs in reverse.
+  order: number;
+}
+
+// One feature's run in one mount: what dispose needs to tear it down.
+interface FeatureRecord {
+  id: string;
+  descriptor: FeatureDescriptor;
+  controller: AbortController;
+  root: Document | Element;
+  ctx: unknown;
+  // `onSetup` completed without returning `false`, so `onDestroy` is owed.
+  setupDone: boolean;
+  cleanups: OnEachCleanup[];
+  order: number;
 }
 
 interface DependencyGate {
@@ -37,6 +53,7 @@ interface FeatureScope {
   // Features without `expose`, or that short-circuited (disabled/aborted/`onSetup`→false), get no
   // entry — so `exposedValues.has(id)` is a meaningful "did this feature expose?" check.
   exposedValues: Map<string, unknown>;
+  records: FeatureRecord[];
 }
 
 interface ExecutionContext {
@@ -113,12 +130,11 @@ function withTimeout<T>(
 }
 
 async function initFeature(
-  feature: FeatureDescriptor,
+  record: FeatureRecord,
   selectors: string[],
   deps: Record<string, unknown>,
-  root: Document | Element,
-  controller: AbortController,
 ): Promise<unknown> {
+  const { descriptor: feature, controller, root } = record;
   const { signal } = controller;
   if (feature.enabled === false) return EXPOSE_SKIPPED;
   if (signal.aborted) return EXPOSE_SKIPPED;
@@ -132,6 +148,8 @@ async function initFeature(
       return EXPOSE_SKIPPED;
     }
   }
+  record.ctx = ctx;
+  record.setupDone = true;
 
   if (signal.aborted) return EXPOSE_SKIPPED;
 
@@ -139,7 +157,7 @@ async function initFeature(
     const elements = root.querySelectorAll(selectors.join(', '));
     for (let j = 0; j < elements.length; j++) {
       if (signal.aborted) return EXPOSE_SKIPPED;
-      await feature.onEach({
+      const cleanup = await feature.onEach({
         el: elements[j]!,
         index: j,
         elements,
@@ -147,6 +165,7 @@ async function initFeature(
         root,
         signal,
       });
+      if (typeof cleanup === 'function') record.cleanups.push(cleanup);
     }
   }
 
@@ -310,9 +329,9 @@ function buildValidDeps(
 }
 
 async function runWithDeps(
-  { meta, descriptor, validDeps }: LoadedFeature,
+  { meta, validDeps }: LoadedFeature,
   ctx: ExecutionContext,
-  controller: AbortController,
+  record: FeatureRecord,
 ): Promise<void> {
   const deps: Record<string, unknown> = {};
 
@@ -336,20 +355,14 @@ async function runWithDeps(
     }
   }
 
-  const exposed = await initFeature(
-    descriptor,
-    meta.selectors,
-    deps,
-    ctx.root,
-    controller,
-  );
+  const exposed = await initFeature(record, meta.selectors, deps);
 
   // Store the exposed value before this feature's markReady fires (markReady runs in
   // dispatchWaves's finally, after runWithDeps resolves). EXPOSE_SKIPPED means `expose` never
   // ran (no expose, or short-circuited) → no entry. The `!signal.aborted` guard blocks a
   // timed-out feature's abandoned background run from writing a ghost value after markReady
   // (when the timeout won the race, signal.aborted is true).
-  if (exposed !== EXPOSE_SKIPPED && !controller.signal.aborted) {
+  if (exposed !== EXPOSE_SKIPPED && !record.controller.signal.aborted) {
     ctx.scopeOf(meta.id).exposedValues.set(meta.id, exposed);
   }
 }
@@ -368,6 +381,17 @@ async function dispatchWaves(
       waveFeatures.map(async (feature) => {
         const controller = new AbortController();
         const scope = ctx.scopeOf(feature.meta.id);
+        const record: FeatureRecord = {
+          id: feature.meta.id,
+          descriptor: feature.descriptor,
+          controller,
+          root: ctx.root,
+          ctx: undefined,
+          setupDone: false,
+          cleanups: [],
+          order: feature.order,
+        };
+        scope.records.push(record);
         try {
           const effectiveTimeout = feature.meta.timeout ?? globalTimeout;
 
@@ -378,7 +402,7 @@ async function dispatchWaves(
           }
 
           await withTimeout(
-            runWithDeps(feature, ctx, controller),
+            runWithDeps(feature, ctx, record),
             effectiveTimeout,
             feature.meta.id,
             controller,
@@ -403,16 +427,26 @@ async function loadChunks(
   prunedEdges: Set<string>,
   scopeOf: (id: string) => FeatureScope,
   warn: LogFn,
+  orderBase: number,
 ): Promise<LoadedFeature[]> {
-  const results = await Promise.allSettled(sortedFeatures.map((f) => f.load()));
+  // A load() that throws synchronously is recorded as a failed load, like a rejection.
+  const results = await Promise.allSettled(
+    sortedFeatures.map((f) => Promise.resolve().then(() => f.load())),
+  );
   const loaded: LoadedFeature[] = [];
 
   for (let i = 0; i < results.length; i++) {
     const result = results[i]!;
     const meta = sortedFeatures[i]!;
 
-    if (result.status === 'rejected') {
-      warn(`[loader] Failed to load feature "${meta.id}":`, result.reason);
+    const descriptor =
+      result.status === 'fulfilled' ? result.value?.default : undefined;
+    if (descriptor == null) {
+      const reason =
+        result.status === 'rejected'
+          ? result.reason
+          : new TypeError('The module has no default export');
+      warn(`[loader] Failed to load feature "${meta.id}":`, reason);
       const scope = scopeOf(meta.id);
       scope.failedIds.add(meta.id);
       scope.gate.markReady(meta.id);
@@ -421,8 +455,9 @@ async function loadChunks(
 
     loaded.push({
       meta,
-      descriptor: result.value.default,
+      descriptor,
       validDeps: buildValidDeps(meta, knownIds, prunedEdges, warn),
+      order: orderBase + i,
     });
   }
 
@@ -435,8 +470,51 @@ function makeWarn(logging: boolean | undefined): LogFn {
     : () => {};
 }
 
-function createScope(gate: DependencyGate): FeatureScope {
-  return { gate, failedIds: new Set(), exposedValues: new Map() };
+function createScope(
+  gate: DependencyGate,
+  records: FeatureRecord[] = [],
+): FeatureScope {
+  return { gate, failedIds: new Set(), exposedValues: new Map(), records };
+}
+
+async function attemptTeardown(
+  step: () => void | Promise<void>,
+  id: string,
+  warn: LogFn,
+): Promise<void> {
+  try {
+    await step();
+  } catch (err) {
+    warn(`[runtime] Teardown of feature "${id}" failed:`, err);
+  }
+}
+
+async function teardownRecord(
+  record: FeatureRecord,
+  warn: LogFn,
+): Promise<void> {
+  const { id, descriptor, controller, root, ctx, setupDone, cleanups } = record;
+  for (const cleanup of cleanups) await attemptTeardown(cleanup, id, warn);
+  const onDestroy = setupDone ? descriptor.onDestroy : null;
+  if (onDestroy) {
+    await attemptTeardown(
+      () => onDestroy({ ctx, signal: controller.signal, root }),
+      id,
+      warn,
+    );
+  }
+}
+
+// Empties every list first, so tearing down the same lists again is a no-op.
+async function teardownRecords(
+  lists: FeatureRecord[][],
+  warn: LogFn,
+): Promise<void> {
+  const pending = lists
+    .flatMap((records) => records.splice(0))
+    .sort((a, b) => b.order - a.order);
+  for (const record of pending) record.controller.abort();
+  for (const record of pending) await teardownRecord(record, warn);
 }
 
 interface RuntimeGlobals {
@@ -456,8 +534,10 @@ async function runMount(
   globals: RuntimeGlobals,
   candidates: FeatureMeta[],
   root: Document | Element,
+  records: FeatureRecord[],
   warn: LogFn,
   globalTimeout: number,
+  orderBase: number,
 ): Promise<void> {
   const matchedFeatures = matchFeatures(candidates, root, warn);
   if (!matchedFeatures.length) return;
@@ -471,7 +551,10 @@ async function runMount(
 
   const matchedIds = new Set(sortedFeatures.map((f) => f.id));
   const knownIds = new Set(features.map((f) => f.id));
-  const local = createScope(createDependencyGate(features, matchedIds));
+  const local = createScope(
+    createDependencyGate(features, matchedIds),
+    records,
+  );
   const scopeOf = (id: string) => (globals.ids.has(id) ? globals.scope : local);
 
   const loaded = await loadChunks(
@@ -480,6 +563,7 @@ async function runMount(
     prunedEdges,
     scopeOf,
     warn,
+    orderBase,
   );
 
   const ctx: ExecutionContext = { knownIds, prunedEdges, scopeOf, warn, root };
@@ -498,15 +582,37 @@ export function createFeatureRuntime(
   // Globals run on the first mount only; every later mount matches page features alone.
   let candidates = features;
   const globals = createGlobals(features);
+  // Records of the latest mount; `destroy()` tears it down with the globals.
+  let current: FeatureRecord[] = [];
+  // Orders are topological indexes within one mount. Only the first mount runs
+  // globals, so later mounts are offset past it: their page features, which may
+  // depend on globals, are torn down before any global.
+  let orderBase = 0;
 
   function mount(mountOptions?: MountOptions): MountHandle {
     const root = mountOptions?.root ?? document;
-    const ready = runMount(features, globals, candidates, root, warn, timeout);
+    const records: FeatureRecord[] = [];
+    current = records;
+    const ready = runMount(
+      features,
+      globals,
+      candidates,
+      root,
+      records,
+      warn,
+      timeout,
+      orderBase,
+    );
     candidates = features.filter((f) => !f.global);
-    return { ready, dispose: async () => {} };
+    orderBase = features.length;
+    return { ready, dispose: () => teardownRecords([records], warn) };
   }
 
-  return { mount, destroy: async () => {} };
+  function destroy(): Promise<void> {
+    return teardownRecords([current, globals.scope.records], warn);
+  }
+
+  return { mount, destroy };
 }
 
 // Stateless: one mount of a fresh runtime, never disposed.
