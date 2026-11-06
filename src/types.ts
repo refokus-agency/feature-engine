@@ -4,11 +4,15 @@ export interface FeatureEachContext {
   index: number;
   elements: NodeListOf<Element>;
   ctx: unknown;
+  /** Resolved loader root; `document` when no root option was given. */
+  root: Document | Element;
 }
 
 /** Context object passed as the second argument to `onSetup`; `deps` maps a declared dependency's feature id to its exposed value. */
 export interface OnSetupContext {
   deps: Record<string, unknown>;
+  /** Resolved loader root; `document` when no root option was given. */
+  root: Document | Element;
 }
 
 /** Setup callback — receives matched selectors and a context of exposed dependencies. Return `false` to abort; any other return value is passed as `ctx` to `onEach`. */
@@ -73,4 +77,6 @@ export interface FeatureMeta {
 export interface LoaderOptions {
   timeout: number;
   logging: boolean;
+  /** Container that scopes feature matching and element queries (descendants only). Defaults to `document`. */
+  root?: Document | Element;
 }
