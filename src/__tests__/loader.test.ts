@@ -2446,4 +2446,30 @@ describe('loadFeatures — root option (#135)', () => {
 
     expect(onSetup).toHaveBeenCalledOnce();
   });
+
+  it('accepts a ShadowRoot as root and scopes matching and onEach to the shadow tree', async () => {
+    document.body.innerHTML = '<div data-item id="light"></div>';
+    const host = document.createElement('div');
+    document.body.append(host);
+    const shadow = host.attachShadow({ mode: 'open' });
+    shadow.innerHTML = '<div data-item id="shadowed"></div>';
+    let seenRoot: unknown;
+    const seenIds: string[] = [];
+    const features = [
+      makeLoadable('items', {
+        selectors: ['[data-item]'],
+        onSetup: (_selectors, { root }) => {
+          seenRoot = root;
+        },
+        onEach: ({ el }) => {
+          seenIds.push(el.id);
+        },
+      }),
+    ];
+
+    await loadFeatures(features, { root: shadow });
+
+    expect(seenRoot).toBe(shadow);
+    expect(seenIds).toEqual(['shadowed']);
+  });
 });

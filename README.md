@@ -157,7 +157,7 @@ Loads and executes features in dependency order.
 |--------|------|---------|-------------|
 | `timeout` | `number` | `10000` | Global timeout in ms, used by every feature whose own `timeout` is `null` (a feature-level `timeout` overrides it). `0` disables the timeout globally; negative or `NaN` values fall back to `10000` |
 | `logging` | `boolean` | `true` | Enable/disable console warnings |
-| `root` | `Document \| Element` | `document` | Container that scopes feature matching and `onEach` element queries. Only descendants of `root` are searched |
+| `root` | `FeatureRoot` (`Document \| Element \| DocumentFragment`) | `document` | Container that scopes feature matching and `onEach` element queries. Only descendants of `root` are searched. A `ShadowRoot` works too |
 
 **Behavior:**
 
@@ -260,6 +260,7 @@ import type {
   FeatureDescriptor,       // Frozen runtime descriptor
   FeatureDescriptorInput,  // Input shape for defineFeature()
   FeatureMeta,             // Metadata + lazy loader (used by loadFeatures)
+  FeatureRoot,             // Document | Element | DocumentFragment (loader root)
   LoaderOptions,           // Options for loadFeatures()
   OnSetupFn,               // (selectors: string[], context: OnSetupContext) => unknown | false | Promise<...>
   OnSetupContext,          // { deps, root }

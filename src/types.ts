@@ -1,3 +1,10 @@
+/**
+ * Container that scopes feature matching and element queries. The loader only
+ * calls `querySelector` / `querySelectorAll` on it, so any of these works —
+ * including a `ShadowRoot`, which is a `DocumentFragment`.
+ */
+export type FeatureRoot = Document | Element | DocumentFragment;
+
 /** Context object passed to `onEach` lifecycle callbacks. */
 export interface FeatureEachContext {
   el: Element;
@@ -5,14 +12,14 @@ export interface FeatureEachContext {
   elements: NodeListOf<Element>;
   ctx: unknown;
   /** Resolved loader root; `document` when no root option was given. */
-  root: Document | Element;
+  root: FeatureRoot;
 }
 
 /** Context object passed as the second argument to `onSetup`; `deps` maps a declared dependency's feature id to its exposed value. */
 export interface OnSetupContext {
   deps: Record<string, unknown>;
   /** Resolved loader root; `document` when no root option was given. */
-  root: Document | Element;
+  root: FeatureRoot;
 }
 
 /** Setup callback — receives matched selectors and a context of exposed dependencies. Return `false` to abort; any other return value is passed as `ctx` to `onEach`. */
@@ -78,5 +85,5 @@ export interface LoaderOptions {
   timeout: number;
   logging: boolean;
   /** Container that scopes feature matching and element queries (descendants only). Defaults to `document`. */
-  root?: Document | Element;
+  root?: FeatureRoot;
 }

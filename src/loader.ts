@@ -1,4 +1,9 @@
-import type { FeatureDescriptor, FeatureMeta, LoaderOptions } from './types.ts';
+import type {
+  FeatureDescriptor,
+  FeatureMeta,
+  FeatureRoot,
+  LoaderOptions,
+} from './types.ts';
 
 const DEFAULT_TIMEOUT_MS = 10_000;
 
@@ -32,7 +37,7 @@ interface ExecutionContext {
   exposedValues: Map<string, unknown>;
   warn: LogFn;
   // Resolved `root` option (`document` when omitted); scopes element queries in `initFeature`.
-  root: Document | Element;
+  root: FeatureRoot;
 }
 
 function resolveTimeout(raw: number | undefined, warn: LogFn): number {
@@ -48,7 +53,7 @@ function resolveTimeout(raw: number | undefined, warn: LogFn): number {
 
 function matchFeatures(
   features: FeatureMeta[],
-  root: Document | Element,
+  root: FeatureRoot,
   warn: LogFn,
 ): FeatureMeta[] {
   const matched: FeatureMeta[] = [];
@@ -102,7 +107,7 @@ async function initFeature(
   feature: FeatureDescriptor,
   selectors: string[],
   deps: Record<string, unknown>,
-  root: Document | Element,
+  root: FeatureRoot,
   signal?: AbortSignal,
 ): Promise<unknown> {
   if (feature.enabled === false) return EXPOSE_SKIPPED;
