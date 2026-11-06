@@ -171,6 +171,56 @@ describe('globals', () => {
     );
   });
 
+  it('treat a sync throw, a missing module or a missing default as a failed load', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(noop);
+    document.body.innerHTML = '<p class="p"></p>';
+    const ran: unknown[] = [];
+    const bad = (id: string, load: () => unknown, extra = {}) => ({
+      ...makeLoadable(id, extra),
+      load: load as FeatureMeta['load'],
+    });
+    const syncThrow = () => {
+      throw new Error('sync');
+    };
+    const runtime = createFeatureRuntime(
+      [
+        makeLoadable('g', {
+          global: true,
+          expose: () => 'g',
+          onDestroy: () => void ran.push('destroy g'),
+        }),
+        bad('q', syncThrow, { global: true }),
+        bad('u', async () => undefined, { global: true }),
+        bad('e', async () => ({}), { selectors: ['.p'], dependencies: ['g'] }),
+        makeLoadable('p', {
+          selectors: ['.p'],
+          dependencies: ['g'],
+          onSetup: (_s, { deps }) => ran.push(deps.g),
+        }),
+        makeLoadable('s', {
+          selectors: ['.p'],
+          dependencies: ['u'],
+          onSetup: () => ran.push('s'),
+        }),
+      ],
+      { timeout: 0 },
+    );
+    const first = runtime.mount();
+    await expect(first.ready).resolves.toBeUndefined();
+    await expect(first.dispose()).resolves.toBeUndefined();
+    await expect(runtime.mount().ready).resolves.toBeUndefined();
+    await expect(runtime.destroy()).resolves.toBeUndefined();
+    expect(ran).toEqual(['g', 'g', 'destroy g']);
+    const noDefault = new TypeError('The module has no default export');
+    expect(warn.mock.calls).toEqual(
+      expect.arrayContaining([
+        ['[loader] Failed to load feature "q":', new Error('sync')],
+        ['[loader] Failed to load feature "u":', noDefault],
+        ['[loader] Failed to load feature "e":', noDefault],
+      ]),
+    );
+  });
+
   it('leave deps[id] undefined for an unmatched page dependency a previous page exposed (AC-5)', async () => {
     document.body.innerHTML =
       '<div id="a"><p class="d"></p><p class="p"></p></div><div id="b"><p class="p"></p></div>';
@@ -190,6 +240,199 @@ describe('globals', () => {
     await first.dispose();
     await runtime.mount({ root: $('#b') }).ready;
     expect(received).toEqual(['from-a', undefined]);
+  });
+});
+
+describe('dispose and destroy', () => {
+  it('aborts, runs cleanups then onDestroy for set-up features, keeps globals alive (AC-6)', async () => {
+    document.body.innerHTML =
+      '<p class="p"></p><p class="p"></p><i class="q"></i>';
+    const log: string[] = [];
+    const signals: Record<string, AbortSignal> = {};
+    const runtime = createFeatureRuntime([
+      makeLoadable('g', {
+        global: true,
+        onSetup: (_s, { signal }) => {
+          signals.g = signal;
+        },
+        onDestroy: () => {
+          log.push('g:destroy');
+        },
+      }),
+      makeLoadable('p', {
+        selectors: ['.p'],
+        onSetup: (_s, { signal }) => {
+          signals.p = signal;
+          return 'ctx-p';
+        },
+        onEach:
+          ({ index }) =>
+          () => {
+            log.push(`p:cleanup:${index}:${signals.p!.aborted}`);
+          },
+        onDestroy: ({ ctx, signal, root }) => {
+          log.push(
+            `p:destroy:${ctx}:${signal === signals.p}:${root === document.body}`,
+          );
+        },
+      }),
+      makeLoadable('q', {
+        selectors: ['.q'],
+        onSetup: () => false,
+        onDestroy: () => {
+          log.push('q:destroy');
+        },
+      }),
+      makeLoadable('r', { selectors: ['.q'] }),
+    ]);
+    const handle = runtime.mount({ root: document.body });
+    await handle.ready;
+    expect(log).toEqual([]);
+    await handle.dispose();
+    expect(log).toEqual([
+      'p:cleanup:0:true',
+      'p:cleanup:1:true',
+      'p:destroy:ctx-p:true:true',
+    ]);
+    expect(signals.g!.aborted).toBe(false);
+  });
+
+  it('runs the lifecycle for A, onDestroy for A, then the lifecycle for B (AC-7)', async () => {
+    document.body.innerHTML =
+      '<div id="a"><p class="p"></p></div><div id="b"><p class="p"></p></div>';
+    const log: string[] = [];
+    const runtime = createFeatureRuntime([
+      makeLoadable('p', {
+        selectors: ['.p'],
+        onSetup: (_s, { root }) => {
+          log.push(`setup:${idOf(root)}`);
+        },
+        onEach: ({ root }) => {
+          log.push(`each:${idOf(root)}`);
+        },
+        onReady: ({ root }) => {
+          log.push(`ready:${idOf(root)}`);
+        },
+        onDestroy: ({ root }) => {
+          log.push(`destroy:${idOf(root)}`);
+        },
+      }),
+    ]);
+    const a = runtime.mount({ root: $('#a') });
+    await a.ready;
+    await a.dispose();
+    await runtime.mount({ root: $('#b') }).ready;
+    expect(log).toEqual([
+      'setup:a',
+      'each:a',
+      'ready:a',
+      'destroy:a',
+      'setup:b',
+      'each:b',
+      'ready:b',
+    ]);
+  });
+
+  it('destroy disposes the current mount, then globals once in reverse topological order (AC-8)', async () => {
+    document.body.innerHTML =
+      '<div id="a"><p class="p"></p></div><div id="b"><p class="p"></p></div>';
+    const log: string[] = [];
+    const runtime = createFeatureRuntime([
+      makeLoadable('g2', {
+        global: true,
+        dependencies: ['g1'],
+        onDestroy: () => {
+          log.push('g2');
+        },
+      }),
+      makeLoadable('g1', {
+        global: true,
+        onDestroy: () => {
+          log.push('g1');
+        },
+      }),
+      makeLoadable('p', {
+        selectors: ['.p'],
+        onDestroy: ({ root }) => {
+          log.push(`p:${idOf(root)}`);
+        },
+      }),
+    ]);
+    const a = runtime.mount({ root: $('#a') });
+    await a.ready;
+    await a.dispose();
+    await runtime.mount({ root: $('#b') }).ready;
+    await runtime.destroy();
+    expect(log).toEqual(['p:a', 'p:b', 'g2', 'g1']);
+  });
+
+  it('destroy tears a global down before the page feature it depends on', async () => {
+    document.body.innerHTML = '<p class="p"></p>';
+    const log: string[] = [];
+    const runtime = createFeatureRuntime([
+      makeLoadable('p', {
+        selectors: ['.p'],
+        onDestroy: () => {
+          log.push('p');
+        },
+      }),
+      makeLoadable('g', {
+        global: true,
+        dependencies: ['p'],
+        onDestroy: () => {
+          log.push('g');
+        },
+      }),
+    ]);
+    await runtime.mount().ready;
+    await runtime.destroy();
+    expect(log).toEqual(['g', 'p']);
+  });
+
+  describe('teardown errors (AC-9)', () => {
+    const failing = (log: string[]) => [
+      makeLoadable('g', {
+        global: true,
+        onDestroy: () => Promise.reject(new Error('g-reject')),
+      }),
+      makeLoadable('p', {
+        selectors: ['.p'],
+        onEach: () => () => {
+          throw new Error('cleanup-throw');
+        },
+        onDestroy: () => {
+          log.push('p:destroy');
+        },
+      }),
+    ];
+
+    it('warn with [runtime], keep tearing down, and never reject', async () => {
+      const warn = vi.spyOn(console, 'warn').mockImplementation(noop);
+      document.body.innerHTML = '<p class="p"></p>';
+      const log: string[] = [];
+      const runtime = createFeatureRuntime(failing(log));
+      const handle = runtime.mount();
+      await handle.ready;
+      await expect(handle.dispose()).resolves.toBeUndefined();
+      await expect(runtime.destroy()).resolves.toBeUndefined();
+      expect(log).toEqual(['p:destroy']);
+      expect(warn.mock.calls).toEqual([
+        [
+          '[runtime] Teardown of feature "p" failed:',
+          new Error('cleanup-throw'),
+        ],
+        ['[runtime] Teardown of feature "g" failed:', new Error('g-reject')],
+      ]);
+    });
+
+    it('stay silent with logging: false', async () => {
+      const warn = vi.spyOn(console, 'warn').mockImplementation(noop);
+      document.body.innerHTML = '<p class="p"></p>';
+      const runtime = createFeatureRuntime(failing([]), { logging: false });
+      await runtime.mount().ready;
+      await runtime.destroy();
+      expect(warn).not.toHaveBeenCalled();
+    });
   });
 });
 
