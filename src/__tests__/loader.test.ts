@@ -2594,7 +2594,10 @@ describe('loadFeatures — AbortSignal in hooks (#136)', () => {
     ];
 
     const done = loadFeatures(features);
-    while (!signal) await vi.advanceTimersByTimeAsync(0);
+    for (let i = 0; i < 10 && !signal; i++) {
+      await vi.advanceTimersByTimeAsync(0);
+    }
+    if (!signal) throw new Error('onSetup was not called');
     expect(signal.aborted).toBe(false);
 
     await vi.advanceTimersByTimeAsync(50);

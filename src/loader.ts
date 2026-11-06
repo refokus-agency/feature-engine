@@ -80,7 +80,7 @@ function withTimeout<T>(
   promise: Promise<T>,
   ms: number,
   id: string,
-  controller?: AbortController,
+  controller: AbortController,
 ): Promise<T> {
   if (ms <= 0) return promise;
 
@@ -91,7 +91,7 @@ function withTimeout<T>(
     }),
     new Promise<never>((_, reject) => {
       timer = setTimeout(() => {
-        controller?.abort();
+        controller.abort();
         reject(new Error(`Feature "${id}" timed out after ${ms}ms`));
       }, ms);
     }),

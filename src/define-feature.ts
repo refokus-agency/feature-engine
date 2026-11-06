@@ -26,7 +26,7 @@ import type { FeatureDescriptor, FeatureDescriptorInput } from './types.ts';
  * @param descriptor.global - If `true`, always loads regardless of DOM. Defaults to `false`.
  * @param descriptor.dependencies - IDs of features that must complete first. Defaults to `[]`, deduped.
  * @param descriptor.enabled - Whether the feature is active. Defaults to `true`.
- * @param descriptor.timeout - Max ms for lifecycle execution. Defaults to `null` (no limit).
+ * @param descriptor.timeout - Max ms for lifecycle execution. Defaults to `null` (inherits the `loadFeatures` timeout, 10 000 ms by default).
  * @param descriptor.onSetup - Runs once with selectors. Return `false` to abort.
  * @param descriptor.onEach - Runs per matched element. Not allowed with `global: true`.
  * @param descriptor.onReady - Runs after all `onEach` calls.

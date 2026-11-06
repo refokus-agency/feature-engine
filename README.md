@@ -269,7 +269,7 @@ The signal is aborted when:
 - a hook (or `expose`) throws;
 - `onSetup` returns `false`.
 
-A feature that completes is never aborted, whatever its timeout (including `0`, disabled), so under `loadFeatures` its signal stays live for the rest of the page. `expose` does not receive the signal.
+A feature that completes is never aborted, whatever the timeout (including a global `loadFeatures({ timeout: 0 })`, which disables it), so under `loadFeatures` its signal stays live for the rest of the page. `expose` does not receive the signal.
 
 Registering a listener on an already-aborted signal is a no-op, and a timed-out run keeps executing in the background until it reaches the next hook boundary. Check `signal.aborted` before starting work that has no `signal` option. `signal.reason` is not part of the stable API: do not branch on it.
 
