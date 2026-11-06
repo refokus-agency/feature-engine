@@ -25,8 +25,9 @@ export type OnSetupFn = (
   context: OnSetupContext,
 ) => unknown | false | Promise<unknown | false>;
 
-/** Per-element cleanup returned from `onEach`. */
-export type OnEachCleanup = () => void | Promise<void>;
+/** Per-element cleanup returned from `onEach`. Its return value (or resolved value) is ignored,
+ *  so concise arrows such as `() => tween.kill()` are accepted. */
+export type OnEachCleanup = () => unknown;
 
 /** Per-element callback — runs once for each element matching the feature selectors. May return (or resolve to) a cleanup for that element. */
 export type OnEachFn = (
@@ -48,16 +49,19 @@ export type OnReadyFn = (context: OnReadyContext) => void | Promise<void>;
 
 /** Context object passed to `onDestroy`. */
 export interface OnDestroyContext {
-  /** Value returned by `onSetup`; `undefined` when `onSetup` is absent. */
+  /** Value returned by `onSetup`; `undefined` when `onSetup` is absent. May be `undefined`,
+   *  `false` or partially built if the feature did not complete its lifecycle, so guard reads. */
   ctx: unknown;
-  /** The feature's per-run signal. */
+  /** The feature's per-run signal. Always already aborted when `onDestroy` runs (dispose aborts
+   *  first), so do not register new work on it. */
   signal: AbortSignal;
   /** Root the feature was mounted into; `document` when no root option was given. */
   root: Document | Element;
 }
 
-/** Feature-wide teardown. Invoked only by `createFeatureRuntime`, never by `loadFeatures`. */
-export type OnDestroyFn = (context: OnDestroyContext) => void | Promise<void>;
+/** Feature-wide teardown. Invoked only by `createFeatureRuntime`, never by `loadFeatures`.
+ *  Its return value (or resolved value) is ignored. */
+export type OnDestroyFn = (context: OnDestroyContext) => unknown;
 
 /** Public-API projection called after the lifecycle completes; its return value is
  *  exposed to dependents. `ctx` is `any` so callers can annotate it with the concrete

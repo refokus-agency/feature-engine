@@ -146,7 +146,7 @@ Validates and freezes a feature descriptor. Throws on invalid input.
 | `onEach` | `OnEachFn` | * | | Runs per matched element. Not allowed with `global: true`. May return (or resolve to) a cleanup function for that element |
 | `onReady` | `OnReadyFn` | no | | Runs after all `onEach` calls complete. Receives `{ ctx, signal, root }` |
 | `expose` | `ExposeFn \| null` | no | `null` | Runs last, after `onReady`, with `ctx`. Its return value is published under this feature's `id` and handed to dependents as `deps[id]` in `onSetup` |
-| `onDestroy` | `OnDestroyFn \| null` | no | `null` | Feature-wide teardown. Receives `{ ctx, signal, root }`. Runs only under `createFeatureRuntime`, never under `loadFeatures` — see [Teardown](#teardown) |
+| `onDestroy` | `OnDestroyFn \| null` | no | `null` | Feature-wide teardown. Receives `{ ctx, signal, root }`; `signal` is always already aborted by then and `ctx` may be `undefined` or partial. Runs only under `createFeatureRuntime`, never under `loadFeatures` — see [Teardown](#teardown) |
 
 \* At least one of `onSetup` or `onEach` is required.
 
@@ -296,10 +296,10 @@ import type {
   OnSetupFn,               // (selectors: string[], context: OnSetupContext) => unknown | false | Promise<...>
   OnSetupContext,          // { deps, root, signal }
   OnEachFn,                // (ctx: FeatureEachContext) => void | OnEachCleanup | Promise<void | OnEachCleanup>
-  OnEachCleanup,           // () => void | Promise<void>
+  OnEachCleanup,           // () => unknown (return value ignored)
   OnReadyFn,               // (context: OnReadyContext) => void | Promise<void>
   OnReadyContext,          // { ctx, signal, root }
-  OnDestroyFn,             // (context: OnDestroyContext) => void | Promise<void>
+  OnDestroyFn,             // (context: OnDestroyContext) => unknown (return value ignored)
   OnDestroyContext,        // { ctx, signal, root }
   FeatureEachContext,       // { el, index, elements, ctx, root, signal }
 } from '@refokus-agency/feature-engine';

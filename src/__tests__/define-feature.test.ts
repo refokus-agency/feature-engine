@@ -537,6 +537,20 @@ describe('defineFeature', () => {
         resolvesNumber,
       ]).toHaveLength(8);
     });
+    it('accepts cleanups and onDestroy arrows that return a value, such as kill() or Map#delete', () => {
+      class Tween {
+        kill(): this {
+          return this;
+        }
+      }
+      const tween = new Tween();
+      const registry = new Map<Element, Tween>();
+      const killsTween: OnEachFnFromTypes = () => () => tween.kill();
+      const deletesEntry: OnEachFnFromTypes = ({ el }) => () =>
+        registry.delete(el);
+      const destroyKills: OnDestroyFnFromTypes = () => tween.kill();
+      expect([killsTween, deletesEntry, destroyKills]).toHaveLength(3);
+    });
     it('exports OnDestroyContext, OnDestroyFn and OnEachCleanup from the package entry point (#137 AC-10)', () => {
       const context: OnDestroyContext = {
         ctx: undefined,
