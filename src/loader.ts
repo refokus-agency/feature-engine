@@ -6,6 +6,9 @@ import type {
   OnEachCleanup,
   MountHandle,
   MountOptions,
+  NavigationAdapter,
+  NavigationHandlers,
+  NavigationInfo,
   RuntimeOptions,
 } from './types.ts';
 
@@ -666,6 +669,79 @@ async function destroyRuntime(rt: RuntimeState): Promise<void> {
   await teardownRecords(globals.owner.records.splice(0), rt.warn);
 }
 
+interface NavigationState {
+  handle: MountHandle | null;
+  lastRoot: Element | null;
+  lastNav: NavigationInfo | null;
+}
+
+interface NavigationConnection {
+  /** Closes the port and disconnects the adapter. */
+  teardown(): void;
+}
+
+// Starts the page's dispose without awaiting it.
+function leaveCurrent(state: NavigationState): void {
+  void state.handle?.dispose();
+  state.handle = null;
+}
+
+function connectNavigation(
+  rt: RuntimeState,
+  mount: (options?: MountOptions) => MountHandle,
+  navigation: NavigationAdapter,
+): NavigationConnection {
+  const state: NavigationState = {
+    handle: null,
+    lastRoot: null,
+    lastNav: null,
+  };
+  // Set when teardown starts, so calls made during or after destroy() are ignored.
+  let closed = false;
+  const enterRoot = (root: Element, nav: NavigationInfo): void => {
+    leaveCurrent(state);
+    // The dispose aborts feature signals synchronously, and a listener may have destroyed the runtime.
+    if (closed) return;
+    state.handle = mount({ root });
+    state.lastRoot = root;
+    state.lastNav = nav;
+  };
+  const handlers: NavigationHandlers = {
+    leave() {
+      if (!closed) leaveCurrent(state);
+    },
+    enter(root, nav) {
+      if (!closed) enterRoot(root, nav);
+    },
+    // Remounts only after a leave: a mounted page, or no page yet, makes it a no-op.
+    cancel() {
+      if (!closed && !state.handle && state.lastRoot) {
+        enterRoot(state.lastRoot, state.lastNav!);
+      }
+    },
+  };
+  let disconnect = (): void => {};
+  const connection: NavigationConnection = {
+    // Never disposes the handle: destroyRuntime tears the first mount down with the globals.
+    teardown() {
+      closed = true;
+      try {
+        disconnect();
+      } catch (err) {
+        rt.warn('[runtime] navigation disconnect failed:', err);
+      }
+    },
+  };
+  try {
+    disconnect = navigation.connect(handlers);
+  } catch (err) {
+    // A page entered inside connect() is left to the caller's rollback; close the port first.
+    connection.teardown();
+    throw err;
+  }
+  return connection;
+}
+
 export function createFeatureRuntime(
   features: FeatureMeta[],
   options?: RuntimeOptions,
@@ -710,8 +786,26 @@ export function createFeatureRuntime(
     };
   }
 
+  let navigation: NavigationConnection | null = null;
+  if (options?.navigation) {
+    try {
+      navigation = connectNavigation(rt, mount, options.navigation);
+    } catch (err) {
+      // connect() threw: tear down whatever it mounted, since the caller never gets the runtime.
+      void destroy();
+      throw err;
+    }
+  }
+
   function destroy(): Promise<void> {
-    rt.destroying ??= withCap(destroyRuntime(rt), rt.disposeTimeout);
+    if (!rt.destroying) {
+      // Cleared first: a cleanup calling destroy() during teardown skips it and starts the
+      // shared promise, which the outer call then keeps.
+      const connection = navigation;
+      navigation = null;
+      connection?.teardown();
+      rt.destroying ??= withCap(destroyRuntime(rt), rt.disposeTimeout);
+    }
     return rt.destroying;
   }
 
