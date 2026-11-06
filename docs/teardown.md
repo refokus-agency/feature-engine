@@ -66,4 +66,13 @@ A resource shared by the whole feature (a single window listener, a Lenis instan
 - **Before `ready`.** Disposing a mount before `ready` resolves aborts the hooks still in flight, never starts the features that had not started, and tears down what was already set up. A cleanup that an in-flight `onEach` returns after the dispose runs immediately.
 - **Next mount.** `mount()` returns its handle synchronously and starts the new mount's features only after every capped dispose started before they start has settled, including one called right after `mount()`.
 - **Globals.** Global features are torn down by `runtime.destroy()` only. The first mount ran them, so its features are torn down in the same pass as the globals, ordered only by declared dependencies: a global that depends on a page feature goes first, and one with no edge between them may run in parallel. A later mount, and any earlier mount still disposing, is disposed in full before any global.
-- **Undisposed mounts.** `destroy()` only tracks the current mount. A mount you did not dispose before starting the next one is never aborted or torn down by `destroy()`, so dispose each mount before or right after the next `mount()`.
+- **Undisposed mounts.** `destroy()` only tracks the current mount. A mount you did not dispose before starting the next one is never aborted or torn down by `destroy()`, so dispose each mount before or right after the next `mount()`. With a `navigation` adapter this is automatic: `enter()` leaves the current page before mounting the next one.
+
+## 5. Navigation adapter
+
+With `createFeatureRuntime(features, { navigation, onNavigate })`, the adapter drives the mounts:
+
+- **`leave()`** aborts the navigation `signal`, starts the page's `dispose()` without awaiting it, then runs the cleanups returned by the `onNavigate` handlers, once each. A cleanup that throws is reported with a `[runtime] onNavigate cleanup failed:` warning and the rest still run.
+- **`enter(root, nav)`** leaves the current page if it is still mounted, mounts `root`, then calls the `onNavigate` handlers. The new mount waits for the previous dispose before matching.
+- **`cancel()`** remounts the last entered root after a `leave()`, so an aborted navigation keeps the old page alive.
+- **`destroy()`** aborts the navigation signal, runs the pending cleanups and disconnects the adapter before the usual teardown. It does not dispose the page itself: the first mount is still torn down together with the globals.
