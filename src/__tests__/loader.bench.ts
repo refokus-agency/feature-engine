@@ -17,6 +17,7 @@ function makeDescriptor(
     onEach: null,
     onReady: null,
     expose: null,
+    onDestroy: null,
     ...overrides,
   };
 }

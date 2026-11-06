@@ -143,9 +143,10 @@ Validates and freezes a feature descriptor. Throws on invalid input.
 | `enabled` | `boolean` | no | `true` | Set `false` to disable without removing the file |
 | `timeout` | `number \| null` | no | `null` | Max ms for lifecycle execution. Must be positive. `null` inherits the global `timeout` passed to `loadFeatures` (default `10000`) — it does **not** mean "no limit" |
 | `onSetup` | `OnSetupFn` | * | | Runs once with `(selectors, { deps, root, signal })`. Return `false` to abort; any other value becomes `ctx` |
-| `onEach` | `OnEachFn` | * | | Runs per matched element. Not allowed with `global: true` |
+| `onEach` | `OnEachFn` | * | | Runs per matched element. Not allowed with `global: true`. May return (or resolve to) a cleanup function for that element |
 | `onReady` | `OnReadyFn` | no | | Runs after all `onEach` calls complete. Receives `{ ctx, signal, root }` |
 | `expose` | `ExposeFn \| null` | no | `null` | Runs last, after `onReady`, with `ctx`. Its return value is published under this feature's `id` and handed to dependents as `deps[id]` in `onSetup` |
+| `onDestroy` | `OnDestroyFn \| null` | no | `null` | Feature-wide teardown. Receives `{ ctx, signal, root }`. Runs only under `createFeatureRuntime`, never under `loadFeatures` — see [Teardown](#teardown) |
 
 \* At least one of `onSetup` or `onEach` is required.
 
@@ -189,12 +190,17 @@ defineFeature()
   │    ├─ returns false      → abort (skip onEach, onReady + expose)
   │    └─ returns ctx        → passed to onEach, onReady and expose
   │
-  ├─ onEach({ el, index, elements, ctx, root, signal })  → runs per matched element
+  ├─ onEach({ el, index, elements, ctx, root, signal })  → runs per matched element;
+  │                                                        may return a cleanup for it
   │
   ├─ onReady({ ctx, signal, root })  → runs after all elements processed
   │
-  └─ expose(ctx)             → runs last; return value is published as deps[id]
-                               for dependents, then the feature is marked ready
+  ├─ expose(ctx)             → runs last; return value is published as deps[id]
+  │                            for dependents, then the feature is marked ready
+  │
+  └─ onDestroy({ ctx, signal, root })  → feature-wide teardown, together with the
+                                         onEach cleanups (createFeatureRuntime only;
+                                         loadFeatures never runs them)
 ```
 
 `ctx` in `onReady` is the value returned by `onSetup` (`undefined` when `onSetup` is absent), so state collected per mount can live there instead of in module-level variables. An `onReady()` that ignores its argument keeps working.
@@ -273,6 +279,10 @@ A feature that completes is never aborted, whatever the timeout (including a glo
 
 Registering a listener on an already-aborted signal is a no-op, and a timed-out run keeps executing in the background until it reaches the next hook boundary. Check `signal.aborted` before starting work that has no `signal` option. `signal.reason` is not part of the stable API: do not branch on it.
 
+### Teardown
+
+Resources a feature registers can be released by the feature itself: return a cleanup function from `onEach` for per-element resources, and declare `onDestroy({ ctx, signal, root })` for feature-wide ones. Both run only when features are mounted with `createFeatureRuntime`; `loadFeatures` never invokes them. See [docs/teardown.md](docs/teardown.md).
+
 ## Types
 
 All types are exported from the main entry point:
@@ -285,9 +295,12 @@ import type {
   LoaderOptions,           // Options for loadFeatures()
   OnSetupFn,               // (selectors: string[], context: OnSetupContext) => unknown | false | Promise<...>
   OnSetupContext,          // { deps, root, signal }
-  OnEachFn,                // (ctx: FeatureEachContext) => void | Promise<void>
+  OnEachFn,                // (ctx: FeatureEachContext) => void | OnEachCleanup | Promise<void | OnEachCleanup>
+  OnEachCleanup,           // () => void | Promise<void>
   OnReadyFn,               // (context: OnReadyContext) => void | Promise<void>
   OnReadyContext,          // { ctx, signal, root }
+  OnDestroyFn,             // (context: OnDestroyContext) => void | Promise<void>
+  OnDestroyContext,        // { ctx, signal, root }
   FeatureEachContext,       // { el, index, elements, ctx, root, signal }
 } from '@refokus-agency/feature-engine';
 ```

@@ -25,6 +25,7 @@ function makeDescriptor(
     onEach: null,
     onReady: null,
     expose: null,
+    onDestroy: null,
     ...overrides,
   };
 }
@@ -2723,5 +2724,51 @@ describe('loadFeatures — AbortSignal in hooks (#136)', () => {
 
     expect(order).toEqual(['ready']);
     expect(expose).toHaveBeenCalledWith({ token: 'abc' });
+  });
+});
+
+describe('loadFeatures — teardown hooks are never run (#137)', () => {
+  beforeEach(() => {
+    document.body.innerHTML = '';
+    vi.restoreAllMocks();
+    vi.spyOn(console, 'warn').mockImplementation(noop);
+  });
+
+  it('AC-9: never calls an onEach cleanup (sync or async onEach) nor onDestroy', async () => {
+    document.body.innerHTML = '<div class="s"></div><div class="a"></div>';
+    const syncCleanup = vi.fn();
+    const asyncCleanup = vi.fn();
+    const syncEach = vi.fn(() => syncCleanup);
+    const asyncEach = vi.fn(async () => asyncCleanup);
+    const syncDestroy = vi.fn();
+    const asyncDestroy = vi.fn();
+    const globalDestroy = vi.fn();
+    const features = [
+      makeLoadable('sync', {
+        selectors: ['.s'],
+        onEach: syncEach,
+        onDestroy: syncDestroy,
+      }),
+      makeLoadable('async', {
+        selectors: ['.a'],
+        onEach: asyncEach,
+        onDestroy: asyncDestroy,
+      }),
+      makeLoadable(
+        'glob',
+        { global: true, onSetup: noop, onDestroy: globalDestroy },
+        { global: true },
+      ),
+    ];
+
+    await loadFeatures(features);
+
+    expect(syncEach).toHaveBeenCalledTimes(1);
+    expect(asyncEach).toHaveBeenCalledTimes(1);
+    expect(syncCleanup).not.toHaveBeenCalled();
+    expect(asyncCleanup).not.toHaveBeenCalled();
+    expect(syncDestroy).not.toHaveBeenCalled();
+    expect(asyncDestroy).not.toHaveBeenCalled();
+    expect(globalDestroy).not.toHaveBeenCalled();
   });
 });
