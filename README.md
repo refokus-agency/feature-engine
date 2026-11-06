@@ -309,6 +309,34 @@ await runtime.destroy();
 - `destroy()` disposes the current mount, then the globals, with the same guarantees. The first mount ran the globals, so its features and the globals are torn down in one pass, ordered by their declared dependencies. Only the current mount is tracked: dispose each mount when you start the next one. A `mount()` after `destroy()` warns and returns a handle that does nothing.
 - `loadFeatures` is a single mount of a fresh runtime that is never disposed.
 
+#### Navigation adapter
+
+Instead of calling `mount()` and `dispose()` yourself, pass a `navigation` adapter. The runtime calls `connect` once, at creation, and the adapter drives the mounts through three handlers:
+
+```ts
+const runtime = createFeatureRuntime(features, {
+  navigation: {
+    connect({ leave, enter, cancel }) {
+      enter(document.querySelector('main')!, { initial: true });
+      const off = onTransition({ leave, enter: (el, url) => enter(el, { initial: false, url }), cancel });
+      return off; // called once by destroy()
+    },
+  },
+  onNavigate: [
+    ({ root, nav, signal, ready }) => {
+      const observer = trackPage(root, nav.url);
+      return () => observer.disconnect(); // runs on the next leave or on destroy()
+    },
+  ],
+});
+```
+
+- `leave()` disposes the current page, aborts its navigation `signal` and runs the cleanups its `onNavigate` handlers returned. Without a current page it does nothing.
+- `enter(root, nav)` mounts `root`, leaving the current page first if it is still mounted, then calls each `onNavigate` handler in order with `{ root, nav, signal, ready }`. A handler that throws is reported with a `[runtime]` warning; the others still run and the mount is kept. Only a returned function is kept as a cleanup.
+- `cancel()` remounts the last entered root with its last `nav` and runs the handlers again, for a navigation aborted after `leave()`. It does nothing while a page is mounted.
+- `destroy()` aborts the navigation signal, runs the pending cleanups and calls the disconnect function once, then tears down the mounts and globals as before. Handler calls after `destroy()` are ignored.
+- Without `navigation`, `onNavigate` is never called.
+
 ## Types
 
 All types are exported from the main entry point:
@@ -320,9 +348,14 @@ import type {
   FeatureMeta,             // Metadata + lazy loader (used by loadFeatures)
   LoaderOptions,           // Options for loadFeatures()
   FeatureRuntime,          // { mount, destroy }, returned by createFeatureRuntime()
-  RuntimeOptions,          // { timeout, logging, disposeTimeout }
+  RuntimeOptions,          // { timeout, logging, disposeTimeout, navigation, onNavigate }
   MountOptions,            // { root }
   MountHandle,             // { ready, dispose }
+  NavigationAdapter,       // { connect(handlers) => disconnect }
+  NavigationHandlers,      // { leave, enter, cancel }
+  NavigationInfo,          // { initial, url, html }
+  NavigateHandler,         // (event: NavigateEvent) => void | (() => void)
+  NavigateEvent,           // { root, nav, signal, ready }
   OnSetupFn,               // (selectors: string[], context: OnSetupContext) => unknown | false | Promise<...>
   OnSetupContext,          // { deps, root, signal }
   OnEachFn,                // (ctx: FeatureEachContext) => void | OnEachCleanup | Promise<void | OnEachCleanup>

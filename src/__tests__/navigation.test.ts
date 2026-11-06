@@ -286,6 +286,21 @@ describe('navigation adapter', () => {
     expect(warn).not.toHaveBeenCalled();
   });
 
+  it('without an adapter the runtime stays manual and onNavigate is never called (AC-13)', async () => {
+    document.body.innerHTML = '<main id="a"><i data-p></i></main>';
+    const log: string[] = [];
+    const handler = vi.fn();
+    const runtime = createFeatureRuntime([pageFeature(log)], {
+      onNavigate: [handler],
+    });
+    const handle = runtime.mount({ root: document.getElementById('a')! });
+    await handle.ready;
+    await handle.dispose();
+    await runtime.destroy();
+    expect(log).toEqual(['setup:a', 'destroy:a']);
+    expect(handler).not.toHaveBeenCalled();
+  });
+
   it('a handler that leaves skips the rest and runs its cleanup at once (edge 20)', async () => {
     const cleanup = vi.fn();
     const after = vi.fn();
@@ -492,6 +507,24 @@ describe('navigation adapter', () => {
     expect(warn).not.toHaveBeenCalled();
   });
 
+  it('mounts a page entered synchronously inside connect (edge 7)', async () => {
+    document.body.innerHTML = '<main id="a"><i data-p></i></main>';
+    const log: string[] = [];
+    const handler = vi.fn();
+    createFeatureRuntime([pageFeature(log)], {
+      navigation: {
+        connect(h) {
+          h.enter(document.getElementById('a')!, { initial: true });
+          return noop;
+        },
+      },
+      onNavigate: [handler],
+    });
+    expect(handler).toHaveBeenCalledTimes(1);
+    await handler.mock.calls[0]![0].ready;
+    expect(log).toEqual(['setup:a']);
+  });
+
   it('rolls back and rethrows when connect throws after entering (edge 21)', async () => {
     document.body.innerHTML =
       '<main id="a"><i data-p></i></main><main id="b"><i data-p></i></main>';
@@ -523,5 +556,54 @@ describe('navigation adapter', () => {
     await event.ready;
     await flush();
     expect(log).toEqual([]);
+  });
+
+  it('a leave before ready never sets the page up and ready still resolves (edge 10)', async () => {
+    let event!: NavigateEvent;
+    const { fake, log, a } = setup([
+      (e) => {
+        event = e;
+      },
+    ]);
+    fake.enter(a);
+    fake.leave();
+    await event.ready;
+    await flush();
+    expect(log).toEqual([]);
+  });
+
+  it('destroy before any transition tears the first page down with the globals, in dependency order (risk)', async () => {
+    document.body.innerHTML = '<main id="a"><i data-p></i></main>';
+    const log: string[] = [];
+    const fake = createFakeNavigationAdapter();
+    const runtime = createFeatureRuntime(
+      [pageFeature(log), makeFeature(log, 'g', true, ['page'])],
+      { navigation: fake.adapter, onNavigate: [] },
+    );
+    fake.enter(document.getElementById('a')!);
+    await flush();
+    await flush();
+    await runtime.destroy();
+    expect(log).toEqual(['setup:a', 'setup:g', 'destroy:g', 'destroy:a']);
+  });
+
+  it('destroy after a transition disposes the pages before the globals (risk)', async () => {
+    const log: string[] = [];
+    document.body.innerHTML =
+      '<main id="a"><i data-p></i></main><main id="b"><i data-p></i></main>';
+    const fake = createFakeNavigationAdapter();
+    const runtime = createFeatureRuntime(
+      [pageFeature(log), makeFeature(log, 'g', true)],
+      { navigation: fake.adapter },
+    );
+    fake.enter(document.getElementById('a')!);
+    await flush();
+    fake.enter(document.getElementById('b')!);
+    await flush();
+    await flush();
+    await runtime.destroy();
+    expect(log).toContain('destroy:a');
+    expect(log.indexOf('destroy:a')).toBeLessThan(log.indexOf('setup:b'));
+    expect(log.slice(-2)).toEqual(['destroy:b', 'destroy:g']);
   });
 });
