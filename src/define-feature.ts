@@ -3,15 +3,19 @@ import type { FeatureDescriptor, FeatureDescriptorInput } from './types.ts';
 /**
  * Validates and freezes a feature descriptor.
  *
- * Lifecycle: `onSetup(selectors, { deps, root })` → `onEach({ el, index, elements, ctx, root })` → `onReady()`
+ * Lifecycle: `onSetup(selectors, { deps, root, signal })` → `onEach({ el, index, elements, ctx, root, signal })`
+ * → `onReady({ ctx, signal, root })`
  * For global features (`global: true`): `onSetup` → `onReady` only (`onEach` is not permitted).
  *
  * - `onSetup` runs once. Return `false` to abort; anything else becomes `ctx`.
  *   If omitted, `ctx` passed to `onEach` will be `undefined`.
- * - `onEach` runs per matched DOM element. Receives `{ el, index, elements, ctx, root }`.
+ * - `onEach` runs per matched DOM element. Receives `{ el, index, elements, ctx, root, signal }`.
  * - `root` is the container `loadFeatures` was scoped to (`document` by default); query
  *   through `root` or `el` instead of `document`.
- * - `onReady` runs after all `onEach` calls. Post-processing (e.g. `ScrollTrigger.refresh`).
+ * - `onReady` runs after all `onEach` calls. Receives `{ ctx, signal, root }`, where `ctx` is
+ *   the `onSetup` return value. Post-processing (e.g. `ScrollTrigger.refresh`).
+ * - `signal` is one `AbortSignal` per feature, aborted when the feature stops being alive
+ *   (timeout, a hook throws, or `onSetup` returns `false`) — never on success.
  *
  * At least one of `onSetup` or `onEach` is required.
  *
@@ -22,7 +26,7 @@ import type { FeatureDescriptor, FeatureDescriptorInput } from './types.ts';
  * @param descriptor.global - If `true`, always loads regardless of DOM. Defaults to `false`.
  * @param descriptor.dependencies - IDs of features that must complete first. Defaults to `[]`, deduped.
  * @param descriptor.enabled - Whether the feature is active. Defaults to `true`.
- * @param descriptor.timeout - Max ms for lifecycle execution. Defaults to `null` (no limit).
+ * @param descriptor.timeout - Max ms for lifecycle execution. Defaults to `null` (inherits the `loadFeatures` timeout, 10 000 ms by default).
  * @param descriptor.onSetup - Runs once with selectors. Return `false` to abort.
  * @param descriptor.onEach - Runs per matched element. Not allowed with `global: true`.
  * @param descriptor.onReady - Runs after all `onEach` calls.

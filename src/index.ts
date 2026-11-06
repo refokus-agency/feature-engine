@@ -5,6 +5,7 @@ export type {
   FeatureMeta,
   LoaderOptions,
   OnEachFn,
+  OnReadyContext,
   OnReadyFn,
   OnSetupContext,
   OnSetupFn,

@@ -80,7 +80,7 @@ function withTimeout<T>(
   promise: Promise<T>,
   ms: number,
   id: string,
-  controller?: AbortController,
+  controller: AbortController,
 ): Promise<T> {
   if (ms <= 0) return promise;
 
@@ -91,7 +91,7 @@ function withTimeout<T>(
     }),
     new Promise<never>((_, reject) => {
       timer = setTimeout(() => {
-        controller?.abort();
+        controller.abort();
         reject(new Error(`Feature "${id}" timed out after ${ms}ms`));
       }, ms);
     }),
@@ -103,34 +103,46 @@ async function initFeature(
   selectors: string[],
   deps: Record<string, unknown>,
   root: Document | Element,
-  signal?: AbortSignal,
+  controller: AbortController,
 ): Promise<unknown> {
+  const { signal } = controller;
   if (feature.enabled === false) return EXPOSE_SKIPPED;
-  if (signal?.aborted) return EXPOSE_SKIPPED;
+  if (signal.aborted) return EXPOSE_SKIPPED;
 
   let ctx: unknown;
   if (feature.onSetup) {
-    ctx = await feature.onSetup(selectors, { deps, root });
-    if (ctx === false) return EXPOSE_SKIPPED;
+    ctx = await feature.onSetup(selectors, { deps, root, signal });
+    if (ctx === false) {
+      // Opting out ends the feature's lifetime: release what onSetup registered.
+      controller.abort();
+      return EXPOSE_SKIPPED;
+    }
   }
 
-  if (signal?.aborted) return EXPOSE_SKIPPED;
+  if (signal.aborted) return EXPOSE_SKIPPED;
 
   if (feature.onEach && selectors.length) {
     const elements = root.querySelectorAll(selectors.join(', '));
     for (let j = 0; j < elements.length; j++) {
-      if (signal?.aborted) return EXPOSE_SKIPPED;
-      await feature.onEach({ el: elements[j]!, index: j, elements, ctx, root });
+      if (signal.aborted) return EXPOSE_SKIPPED;
+      await feature.onEach({
+        el: elements[j]!,
+        index: j,
+        elements,
+        ctx,
+        root,
+        signal,
+      });
     }
   }
 
-  if (signal?.aborted) return EXPOSE_SKIPPED;
+  if (signal.aborted) return EXPOSE_SKIPPED;
 
   if (feature.onReady) {
-    await feature.onReady();
+    await feature.onReady({ ctx, signal, root });
   }
 
-  if (signal?.aborted) return EXPOSE_SKIPPED;
+  if (signal.aborted) return EXPOSE_SKIPPED;
 
   // Project the feature's public API after its full lifecycle. Awaited so an async
   // `expose` resolves to a value (not a Promise) for dependents. `ctx` is `undefined`
@@ -286,7 +298,7 @@ function buildValidDeps(
 async function runWithDeps(
   { meta, descriptor, validDeps }: LoadedFeature,
   ctx: ExecutionContext,
-  signal?: AbortSignal,
+  controller: AbortController,
 ): Promise<void> {
   const deps: Record<string, unknown> = {};
 
@@ -313,15 +325,15 @@ async function runWithDeps(
     meta.selectors,
     deps,
     ctx.root,
-    signal,
+    controller,
   );
 
   // Store the exposed value before this feature's markReady fires (markReady runs in
   // dispatchWaves's finally, after runWithDeps resolves). EXPOSE_SKIPPED means `expose` never
-  // ran (no expose, or short-circuited) → no entry. The `!signal?.aborted` guard blocks a
+  // ran (no expose, or short-circuited) → no entry. The `!signal.aborted` guard blocks a
   // timed-out feature's abandoned background run from writing a ghost value after markReady
   // (when the timeout won the race, signal.aborted is true).
-  if (exposed !== EXPOSE_SKIPPED && !signal?.aborted) {
+  if (exposed !== EXPOSE_SKIPPED && !controller.signal.aborted) {
     ctx.exposedValues.set(meta.id, exposed);
   }
 }
@@ -349,12 +361,15 @@ async function dispatchWaves(
           }
 
           await withTimeout(
-            runWithDeps(feature, ctx, controller.signal),
+            runWithDeps(feature, ctx, controller),
             effectiveTimeout,
             feature.meta.id,
             controller,
           );
         } catch (err) {
+          // A failed feature is no longer alive: abort its signal so anything a hook
+          // registered with it is released. Idempotent after a timeout abort.
+          controller.abort();
           ctx.failedIds.add(feature.meta.id);
           ctx.warn(`[loader] Feature "${feature.meta.id}" failed:`, err);
         } finally {

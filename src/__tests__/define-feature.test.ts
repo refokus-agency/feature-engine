@@ -2,7 +2,13 @@ import { describe, it, expect } from 'vitest';
 import { defineFeature } from '../define-feature.ts';
 import type { FeatureDescriptorInput } from '../types.ts';
 // AC-4: OnSetupContext and the updated OnSetupFn must be re-exported from the package entry point.
-import type { OnSetupContext, OnSetupFn } from '../index.ts';
+import type {
+  FeatureEachContext,
+  OnReadyContext,
+  OnReadyFn,
+  OnSetupContext,
+  OnSetupFn,
+} from '../index.ts';
 
 const noop = () => {};
 
@@ -365,7 +371,11 @@ describe('defineFeature', () => {
     });
 
     it('exposes OnSetupContext and OnSetupFn from the package entry point (AC-4)', () => {
-      const context: OnSetupContext = { deps: {}, root: document };
+      const context: OnSetupContext = {
+        deps: {},
+        root: document,
+        signal: new AbortController().signal,
+      };
       // OnSetupFn is also re-exported from the entry point and now takes the
       // 2nd context arg with `deps` typed as Record<string, unknown>.
       const setup: OnSetupFn = (selectors, { deps }) => ({
@@ -374,6 +384,42 @@ describe('defineFeature', () => {
       });
       expect(context.deps).toEqual({});
       expect(typeof setup).toBe('function');
+    });
+
+    it('requires signal on every hook context and exports OnReadyContext (#136 AC-10)', () => {
+      const signal = new AbortController().signal;
+      const el = document.createElement('div');
+      const setupContext: OnSetupContext = { deps: {}, root: document, signal };
+      const eachContext: FeatureEachContext = {
+        el,
+        index: 0,
+        elements: document.querySelectorAll('div'),
+        ctx: undefined,
+        root: document,
+        signal,
+      };
+      const readyContext: OnReadyContext = {
+        ctx: undefined,
+        signal,
+        root: document,
+      };
+      // @ts-expect-error — signal is required on the onSetup context
+      const missingSetupSignal: OnSetupContext = { deps: {}, root: document };
+      // @ts-expect-error — signal is required on the onReady context
+      const missingReadySignal: OnReadyContext = {
+        ctx: undefined,
+        root: document,
+      };
+      // A zero-argument onReady stays assignable to OnReadyFn.
+      const legacyReady: OnReadyFn = () => {};
+      expect(
+        [setupContext, eachContext, readyContext].map((c) => c.signal),
+      ).toEqual([signal, signal, signal]);
+      expect([
+        missingSetupSignal,
+        missingReadySignal,
+        legacyReady,
+      ]).toHaveLength(3);
     });
 
     it('accepts a typed expose param projecting a typed onSetup return (AC-1)', () => {

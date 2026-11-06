@@ -142,9 +142,9 @@ Validates and freezes a feature descriptor. Throws on invalid input.
 | `dependencies` | `string[]` | no | `[]` | Feature IDs that must complete before this one runs |
 | `enabled` | `boolean` | no | `true` | Set `false` to disable without removing the file |
 | `timeout` | `number \| null` | no | `null` | Max ms for lifecycle execution. Must be positive. `null` inherits the global `timeout` passed to `loadFeatures` (default `10000`) — it does **not** mean "no limit" |
-| `onSetup` | `OnSetupFn` | * | | Runs once with `(selectors, { deps })`. Return `false` to abort; any other value becomes `ctx` |
+| `onSetup` | `OnSetupFn` | * | | Runs once with `(selectors, { deps, root, signal })`. Return `false` to abort; any other value becomes `ctx` |
 | `onEach` | `OnEachFn` | * | | Runs per matched element. Not allowed with `global: true` |
-| `onReady` | `OnReadyFn` | no | | Runs after all `onEach` calls complete |
+| `onReady` | `OnReadyFn` | no | | Runs after all `onEach` calls complete. Receives `{ ctx, signal, root }` |
 | `expose` | `ExposeFn \| null` | no | `null` | Runs last, after `onReady`, with `ctx`. Its return value is published under this feature's `id` and handed to dependents as `deps[id]` in `onSetup` |
 
 \* At least one of `onSetup` or `onEach` is required.
@@ -183,19 +183,21 @@ Features with `enabled: false` and duplicate IDs are excluded. The virtual modul
 ```
 defineFeature()
   │
-  ├─ onSetup(selectors, { deps, root })  → runs once; receives matched selectors,
-  │    │                                    the exposed values of its dependencies
-  │    │                                    and the loader root
+  ├─ onSetup(selectors, { deps, root, signal })  → runs once; receives matched selectors,
+  │    │                                            the exposed values of its dependencies,
+  │    │                                            the loader root and the abort signal
   │    ├─ returns false      → abort (skip onEach, onReady + expose)
-  │    └─ returns ctx        → passed to onEach
+  │    └─ returns ctx        → passed to onEach, onReady and expose
   │
-  ├─ onEach({ el, index, elements, ctx, root })  → runs per matched element
+  ├─ onEach({ el, index, elements, ctx, root, signal })  → runs per matched element
   │
-  ├─ onReady()               → runs after all elements processed
+  ├─ onReady({ ctx, signal, root })  → runs after all elements processed
   │
   └─ expose(ctx)             → runs last; return value is published as deps[id]
                                for dependents, then the feature is marked ready
 ```
+
+`ctx` in `onReady` is the value returned by `onSetup` (`undefined` when `onSetup` is absent), so state collected per mount can live there instead of in module-level variables. An `onReady()` that ignores its argument keeps working.
 
 For **global features** (`global: true`): only `onSetup`, `onReady` and `expose` run. `onEach` is not allowed.
 
@@ -251,6 +253,26 @@ onEach: ({ el, root }) => {
 
 **Descendants only:** `root` is searched with `root.querySelector` / `root.querySelectorAll`, which never return the `root` element itself. A selector that matches only the container does not match the feature. To target the container, put the selector on a child element of the container instead.
 
+### Cancelling work with `signal`
+
+`onSetup`, `onEach` and `onReady` receive the same `AbortSignal`, one per feature. It follows the feature's lifetime: it is aborted when the feature stops being alive, and never because the feature finished mounting. Pass it to anything that accepts one, so listeners and requests are released together with the feature:
+
+```ts
+onSetup: (_selectors, { signal }) => {
+  window.addEventListener('resize', onResize, { signal });
+},
+```
+
+The signal is aborted when:
+
+- the feature's `timeout` elapses;
+- a hook (or `expose`) throws;
+- `onSetup` returns `false`.
+
+A feature that completes is never aborted, whatever the timeout (including a global `loadFeatures({ timeout: 0 })`, which disables it), so under `loadFeatures` its signal stays live for the rest of the page. `expose` does not receive the signal.
+
+Registering a listener on an already-aborted signal is a no-op, and a timed-out run keeps executing in the background until it reaches the next hook boundary. Check `signal.aborted` before starting work that has no `signal` option. `signal.reason` is not part of the stable API: do not branch on it.
+
 ## Types
 
 All types are exported from the main entry point:
@@ -262,10 +284,11 @@ import type {
   FeatureMeta,             // Metadata + lazy loader (used by loadFeatures)
   LoaderOptions,           // Options for loadFeatures()
   OnSetupFn,               // (selectors: string[], context: OnSetupContext) => unknown | false | Promise<...>
-  OnSetupContext,          // { deps, root }
+  OnSetupContext,          // { deps, root, signal }
   OnEachFn,                // (ctx: FeatureEachContext) => void | Promise<void>
-  OnReadyFn,               // () => void | Promise<void>
-  FeatureEachContext,       // { el, index, elements, ctx, root }
+  OnReadyFn,               // (context: OnReadyContext) => void | Promise<void>
+  OnReadyContext,          // { ctx, signal, root }
+  FeatureEachContext,       // { el, index, elements, ctx, root, signal }
 } from '@refokus-agency/feature-engine';
 ```
 
