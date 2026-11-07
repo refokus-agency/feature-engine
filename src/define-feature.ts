@@ -3,12 +3,14 @@ import type { FeatureDescriptor, FeatureDescriptorInput } from './types.ts';
 /**
  * Validates and freezes a feature descriptor.
  *
- * Lifecycle: `onSetup(selectors)` → `onEach({ el, index, elements, ctx })` → `onReady()`
+ * Lifecycle: `onSetup(selectors, { deps, root })` → `onEach({ el, index, elements, ctx, root })` → `onReady()`
  * For global features (`global: true`): `onSetup` → `onReady` only (`onEach` is not permitted).
  *
  * - `onSetup` runs once. Return `false` to abort; anything else becomes `ctx`.
  *   If omitted, `ctx` passed to `onEach` will be `undefined`.
- * - `onEach` runs per matched DOM element. Receives `{ el, index, elements, ctx }`.
+ * - `onEach` runs per matched DOM element. Receives `{ el, index, elements, ctx, root }`.
+ * - `root` is the container `loadFeatures` was scoped to (`document` by default); query
+ *   through `root` or `el` instead of `document`.
  * - `onReady` runs after all `onEach` calls. Post-processing (e.g. `ScrollTrigger.refresh`).
  *
  * At least one of `onSetup` or `onEach` is required.
