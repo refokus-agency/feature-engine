@@ -594,6 +594,8 @@ async function runMount(rt: RuntimeState, state: MountState): Promise<void> {
     pending = rt.pendingDispose;
     await pending;
   } while (pending !== rt.pendingDispose);
+  // Disposed or destroyed before matching: load nothing, create no records.
+  if (state.closed) return;
   const { features, warn, timeout: globalTimeout } = rt;
   const { root } = state;
   const candidates = state.withGlobals
@@ -658,6 +660,7 @@ async function destroyRuntime(rt: RuntimeState): Promise<void> {
       teardownRecords(records, rt.warn),
       rt.disposeTimeout,
     );
+    rt.pendingDispose = Promise.all([rt.pendingDispose, current.disposing]);
     return current.disposing;
   }
   // A later mount, and any earlier mount still disposing, finish before any global.

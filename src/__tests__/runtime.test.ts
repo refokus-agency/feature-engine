@@ -797,6 +797,28 @@ describe('dispose hardening', () => {
     expect(log).toEqual(['p', 'g']);
   });
 
+  it('destroy right after the first mount() never loads its features', async () => {
+    document.body.innerHTML = '<p class="p"></p>';
+    const g = makeLoadable('g', { global: true });
+    const p = makeLoadable('p', { selectors: ['.p'] });
+    const loads = [vi.spyOn(g, 'load'), vi.spyOn(p, 'load')];
+    const runtime = createFeatureRuntime([g, p]);
+    const handle = runtime.mount();
+    await runtime.destroy();
+    await handle.ready;
+    for (const load of loads) expect(load).not.toHaveBeenCalled();
+  });
+
+  it('dispose right after mount() never loads its features', async () => {
+    document.body.innerHTML = '<p class="p"></p>';
+    const p = makeLoadable('p', { selectors: ['.p'] });
+    const load = vi.spyOn(p, 'load');
+    const handle = createFeatureRuntime([p]).mount();
+    await handle.dispose();
+    await handle.ready;
+    expect(load).not.toHaveBeenCalled();
+  });
+
   it('mount after destroy warns and returns an inert handle (AC-19)', async () => {
     const warn = vi.spyOn(console, 'warn').mockImplementation(noop);
     const onSetup = vi.fn();
