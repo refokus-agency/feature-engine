@@ -57,7 +57,7 @@ Features share values through `expose`/`deps`: after a feature's lifecycle compl
 ## Conventions
 
 - **Imports use explicit `.ts` extensions** (e.g. `from './types.ts'`) — required by `rewriteRelativeImportExtensions` in tsconfig. Match this when adding files.
-- Two package entry points: `.` (main: `defineFeature`, `loadFeatures`, types) and `./vite` (`featureMetadataPlugin`). Keep the runtime entry free of Node built-ins — `node:fs`/`node:path` belong only under `src/vite/`.
+- Three package entry points: `.` (main: `defineFeature`, `loadFeatures`, `createFeatureRuntime`, types), `./vite` (`featureMetadataPlugin`) and `./barba` (`barbaAdapter`, from `src/adapters/barba/`). Keep the runtime entry free of Node built-ins — `node:fs`/`node:path` belong only under `src/vite/`. The core entry never imports `src/adapters/`, and an adapter imports the core with `import type` only, so its built module has no runtime import. `packaging.test.ts` builds into a temp dir and asserts all three.
 - Errors from validation are thrown with `[defineFeature]` / `[featureMetadataPlugin]` prefixes; loader uses non-throwing `[loader]` `console.warn` (suppressible via `logging: false`). Preserve these patterns.
 - Tests live in `src/__tests__/` (`*.test.ts`, `*.smoke.test.ts`, `*.bench.ts`), run under `jsdom` with vitest globals enabled (no need to import `describe`/`it`/`expect`).
 
