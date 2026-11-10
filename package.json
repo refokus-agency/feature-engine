@@ -6,6 +6,7 @@
   "main": "dist/index.js",
   "module": "dist/index.js",
   "types": "dist/index.d.ts",
+  "sideEffects": false,
   "exports": {
     ".": {
       "types": "./dist/index.d.ts",
@@ -14,6 +15,10 @@
     "./vite": {
       "types": "./dist/vite/index.d.ts",
       "import": "./dist/vite/index.js"
+    },
+    "./barba": {
+      "types": "./dist/adapters/barba/index.d.ts",
+      "import": "./dist/adapters/barba/index.js"
     }
   },
   "files": [

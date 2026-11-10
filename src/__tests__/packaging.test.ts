@@ -1,7 +1,8 @@
-import { describe, it, expect } from 'vitest';
+import { afterAll, beforeAll, describe, it, expect } from 'vitest';
 import { execFileSync } from 'node:child_process';
-import { existsSync, readFileSync } from 'node:fs';
-import { resolve } from 'node:path';
+import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { dirname, join, relative, resolve } from 'node:path';
 
 /**
  * Packaging guard for the files Apache-2.0 requires us to distribute.
@@ -76,6 +77,29 @@ const EXPECTED_KEYWORDS = [
   'browser',
   'dependency-graph',
 ] as const;
+
+// Static, side-effect and dynamic import specifiers of an emitted ES module.
+function importSpecifiers(file: string): string[] {
+  const source = readFileSync(file, 'utf8');
+  return [
+    ...source.matchAll(/\b(?:from|import)\s*\(?\s*['"]([^'"]+)['"]/g),
+  ].map((match) => match[1] as string);
+}
+
+// Every file reachable from `entry` through relative imports, with its specifiers.
+function importGraph(entry: string): Map<string, string[]> {
+  const graph = new Map<string, string[]>();
+  const visit = (file: string) => {
+    if (graph.has(file)) return;
+    const specifiers = importSpecifiers(file);
+    graph.set(file, specifiers);
+    for (const specifier of specifiers) {
+      if (specifier.startsWith('.')) visit(resolve(dirname(file), specifier));
+    }
+  };
+  visit(entry);
+  return graph;
+}
 
 function isTrackedByGit(file: string): boolean {
   try {
@@ -205,5 +229,83 @@ describe('packaging — README badges', () => {
       expect.stringContaining('![npm version]'),
       expect.stringContaining('![License: Apache-2.0]'),
     ]);
+  });
+});
+
+/**
+ * The entry points are asserted against a fresh build, not `dist/`: CI runs the
+ * tests before `build`, so `dist/` does not exist when this file runs there. One
+ * `tsc` run into a temp dir serves every assertion below.
+ */
+describe('packaging — package entries', () => {
+  type Exports = Record<string, { types: string; import: string }>;
+  const manifest = JSON.parse(
+    readFileSync(resolve(repoRoot, 'package.json'), 'utf8'),
+  ) as { exports: Exports; sideEffects?: unknown };
+  let outDir = '';
+  // Maps a manifest target such as `./dist/index.js` into the temp build.
+  const built = (target: string) =>
+    join(outDir, target.replace(/^\.\/dist\//, ''));
+
+  beforeAll(() => {
+    outDir = mkdtempSync(join(tmpdir(), 'feature-engine-build-'));
+    try {
+      execFileSync(
+        resolve(repoRoot, 'node_modules/.bin/tsc'),
+        ['-p', 'tsconfig.json', '--outDir', outDir],
+        { cwd: repoRoot, stdio: 'pipe' },
+      );
+    } catch (error) {
+      const { stdout } = error as { stdout?: Buffer };
+      throw new Error(`tsc build failed:\n${String(stdout)}`);
+    }
+  }, 120_000);
+
+  afterAll(() => {
+    rmSync(outDir, { recursive: true, force: true });
+  });
+
+  it('exports ./barba from the built adapter', () => {
+    expect(manifest.exports['./barba']).toEqual({
+      types: './dist/adapters/barba/index.d.ts',
+      import: './dist/adapters/barba/index.js',
+    });
+  });
+
+  it.each(['.', './vite', './barba'])(
+    'builds the types and import targets of %s',
+    (entry) => {
+      const targets = manifest.exports[entry];
+
+      expect(targets).toBeDefined();
+      expect(existsSync(built(targets?.types ?? ''))).toBe(true);
+      expect(existsSync(built(targets?.import ?? ''))).toBe(true);
+    },
+  );
+
+  it('keeps the core entry graph free of the adapters and of node: built-ins', () => {
+    const graph = importGraph(built('./dist/index.js'));
+    const files = [...graph.keys()].map((file) => relative(outDir, file));
+    const specifiers = [...graph.values()].flat();
+
+    expect(files).toContain('loader.js');
+    expect(files.filter((file) => file.startsWith('adapters/'))).toEqual([]);
+    expect(specifiers.filter((s) => s.startsWith('node:'))).toEqual([]);
+    // The same walk does see the built-ins the ./vite entry is allowed to use.
+    const vite = [
+      ...importGraph(built('./dist/vite/index.js')).values(),
+    ].flat();
+    expect(vite.some((s) => s.startsWith('node:'))).toBe(true);
+  });
+
+  it('builds the Barba adapter with no runtime import', () => {
+    const adapter = built('./dist/adapters/barba/index.js');
+
+    expect(readFileSync(adapter, 'utf8')).toContain('function barbaAdapter');
+    expect(importSpecifiers(adapter)).toEqual([]);
+  });
+
+  it('declares the package free of side effects', () => {
+    expect(manifest.sideEffects).toBe(false);
   });
 });
