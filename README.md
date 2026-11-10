@@ -311,57 +311,17 @@ await runtime.destroy();
 
 #### Navigation adapter
 
-Instead of calling `mount()` and `dispose()` yourself, pass a `navigation` adapter. The runtime calls `connect` once, at creation, and the adapter drives the mounts through three handlers:
-
-```ts
-const runtime = createFeatureRuntime(features, {
-  navigation: {
-    connect({ leave, enter, cancel }) {
-      enter(document.querySelector('main')!, { initial: true });
-      const off = onTransition({ leave, enter: (el, url) => enter(el, { initial: false, url }), cancel });
-      return off; // called once by destroy()
-    },
-  },
-  onNavigate: [
-    ({ root, nav, signal, ready }) => {
-      const observer = trackPage(root, nav.url);
-      return () => observer.disconnect(); // runs on the next leave or on destroy()
-    },
-  ],
-});
-```
-
-- `leave()` disposes the current page, aborts its navigation `signal` and runs the cleanups its `onNavigate` handlers returned. Without a current page it does nothing.
-- `enter(root, nav)` mounts `root`, leaving the current page first if it is still mounted, then calls each `onNavigate` handler in order with `{ root, nav, signal, ready }`. A handler that throws is reported with a `[runtime]` warning; the others still run and the mount is kept. Only a returned function is kept as a cleanup.
-- `cancel()` remounts the last entered root with its last `nav` and runs the handlers again, for a navigation aborted after `leave()`. It does nothing while a page is mounted.
-- `destroy()` aborts the navigation signal, runs the pending cleanups and calls the disconnect function once, then tears down the mounts and globals as before. Handler calls after `destroy()` are ignored.
-- Without `navigation`, `onNavigate` is never called.
-
-#### Barba.js adapter
-
-`@refokus-agency/feature-engine/barba` connects Barba v2's global hooks to the navigation port. It is typed against the minimal shape it reads, so the package has no dependency on `@barba/core`.
+Instead of calling `mount()` and `dispose()` yourself, pass a `navigation` adapter: it translates a page-transition library's events into `leave`, `enter` and `cancel` calls, and the runtime mounts and disposes each page for you. Optional `onNavigate` handlers run after each navigation mount starts. The package ships an adapter for Barba.js:
 
 ```ts
 import barba from '@barba/core';
-import { createFeatureRuntime } from '@refokus-agency/feature-engine';
 import { barbaAdapter } from '@refokus-agency/feature-engine/barba';
 
-const navigation = barbaAdapter(barba, { mode: 'async' });
-const runtime = createFeatureRuntime(features, { navigation });
-
-barba.init({
-  transitions: [/* ... */],
-  requestError: navigation.wrapRequestError((trigger, action, url, response) => {
-    // your own handling; return false to skip Barba's forced reload
-  }),
-});
+const runtime = createFeatureRuntime(features, { navigation: barbaAdapter(barba) });
+barba.init({ transitions: [/* ... */] });
 ```
 
-- **Mode.** `'async'` (the default) disposes the old page on `afterLeave`, once its leave animation is done. `'sync'` disposes it on `beforeLeave`, because in a sync transition the new page enters before `afterLeave` fires: the old page's features are torn down while its leave animation is still running. Both modes mount the new page on `beforeEnter`, with `nav.url` set to the next URL and `nav.html` to the full fetched HTML document.
-- **First load.** The first page is mounted from Barba's first-load `beforeEnter` with `nav.initial: true`. If the runtime is created after `barba.init()`, `connect` mounts Barba's current container right away, and the first-load hook is not entered a second time.
-- **Failed requests.** `requestError` is a `barba.init()` option, not a hook, so pass it through `wrapRequestError(userFn?)`. The wrapper calls `cancel()`, which remounts the old page after a leave and does nothing while a page is mounted, then returns `userFn`'s result. Without `userFn` it returns `undefined` and Barba keeps its default reload.
-- **Errors.** A hook never returns a promise to Barba, so Barba never waits for the engine, and an error thrown by the runtime is reported with a `[barba]` warning instead of reaching Barba.
-- **Disconnect.** Barba hooks cannot be unregistered. After `runtime.destroy()` they stay registered and do nothing; the request-error wrapper still forwards to `userFn`.
+See [docs/adapters.md](docs/adapters.md) for the handler contract, `onNavigate`, writing a custom adapter, and the Barba adapter's options (`mode`, `wrapRequestError`, late init).
 
 ## Types
 
