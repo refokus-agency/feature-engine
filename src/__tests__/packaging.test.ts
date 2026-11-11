@@ -272,7 +272,14 @@ describe('packaging — package entries', () => {
     });
   });
 
-  it.each(['.', './vite', './barba'])(
+  it('exports ./webflow from the built integration', () => {
+    expect(manifest.exports['./webflow']).toEqual({
+      types: './dist/integrations/webflow/index.d.ts',
+      import: './dist/integrations/webflow/index.js',
+    });
+  });
+
+  it.each(['.', './vite', './barba', './webflow'])(
     'builds the types and import targets of %s',
     (entry) => {
       const targets = manifest.exports[entry];
@@ -282,6 +289,16 @@ describe('packaging — package entries', () => {
       expect(existsSync(built(targets?.import ?? ''))).toBe(true);
     },
   );
+
+  it('keeps the core entry graph free of the integrations', () => {
+    const graph = importGraph(built('./dist/index.js'));
+    const files = [...graph.keys()].map((file) => relative(outDir, file));
+
+    expect(files).toContain('loader.js');
+    expect(files.filter((file) => file.startsWith('integrations/'))).toEqual(
+      [],
+    );
+  });
 
   it('keeps the core entry graph free of the adapters and of node: built-ins', () => {
     const graph = importGraph(built('./dist/index.js'));
@@ -303,6 +320,15 @@ describe('packaging — package entries', () => {
 
     expect(readFileSync(adapter, 'utf8')).toContain('function barbaAdapter');
     expect(importSpecifiers(adapter)).toEqual([]);
+  });
+
+  it('builds the Webflow integration with no runtime import', () => {
+    const integration = built('./dist/integrations/webflow/index.js');
+
+    expect(readFileSync(integration, 'utf8')).toContain(
+      'function webflowReinit',
+    );
+    expect(importSpecifiers(integration)).toEqual([]);
   });
 
   it('declares the package free of side effects', () => {

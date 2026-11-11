@@ -323,6 +323,8 @@ barba.init({ transitions: [/* ... */] });
 
 See [docs/adapters.md](docs/adapters.md) for the handler contract, `onNavigate`, writing a custom adapter, and the Barba adapter's options (`mode`, `wrapRequestError`, late init).
 
+On Webflow sites, add `webflowReinit(window.Webflow)` from `@refokus-agency/feature-engine/webflow` to `onNavigate` to re-initialize Webflow and its interactions (IX2) after each navigation. Create the runtime after `webflow.js` has run; a module script does this by default. In TypeScript, declare `window.Webflow` as `WebflowLike` yourself, since the package adds no global. See [Webflow re-init](docs/adapters.md#5-webflow-re-init-webflowreinit).
+
 ## Types
 
 All types are exported from the main entry point:
@@ -372,6 +374,14 @@ import type {
   BarbaLike,               // { hooks, wrapper?, data? }: the Barba v2 shape the adapter reads
   BarbaRequestError,       // (trigger, action, url, response) => boolean | void
 } from '@refokus-agency/feature-engine/barba';
+```
+
+The Webflow entry exports:
+
+```ts
+import type {
+  WebflowLike,             // { destroy, ready, require }: the Webflow shape webflowReinit reads
+} from '@refokus-agency/feature-engine/webflow';
 ```
 
 ## Examples
