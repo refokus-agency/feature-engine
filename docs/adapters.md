@@ -8,6 +8,8 @@ Currently available:
 | --- | --- |
 | [Barba.js](#barbajs) | `@refokus-agency/feature-engine/barba` |
 
+The [Webflow re-init handler](#5-webflow-re-init-webflowreinit) (`@refokus-agency/feature-engine/webflow`) is an `onNavigate` handler, not an adapter: it works with any of them.
+
 More adapters (for example one for the View Transition API) may be added later. Until then, any library can be connected with a [custom adapter](#writing-a-custom-adapter).
 
 ## 1. The navigation port
@@ -163,4 +165,46 @@ import type {
   BarbaLike,               // { hooks, wrapper?, data? }: the Barba v2 shape the adapter reads
   BarbaRequestError,       // (trigger, action, url, response) => boolean | void
 } from '@refokus-agency/feature-engine/barba';
+```
+
+## 5. Webflow re-init: `webflowReinit`
+
+Webflow's runtime and IX2 (its interactions engine) scan the DOM once, on page load. After a transition swaps the container, both still point at the old DOM, so the new page's interactions do not run. `@refokus-agency/feature-engine/webflow` ships an `onNavigate` handler that re-initializes them:
+
+```ts
+import barba from '@barba/core';
+import { createFeatureRuntime } from '@refokus-agency/feature-engine';
+import { barbaAdapter } from '@refokus-agency/feature-engine/barba';
+import { webflowReinit, type WebflowLike } from '@refokus-agency/feature-engine/webflow';
+
+// The package declares no global: type `window.Webflow` in your own code.
+declare global {
+  interface Window {
+    Webflow: WebflowLike;
+  }
+}
+
+const runtime = createFeatureRuntime(features, {
+  navigation: barbaAdapter(barba),
+  onNavigate: [webflowReinit(window.Webflow)],
+});
+```
+
+On every navigation except the first load (`nav.initial`), the handler:
+
+1. Waits for the event's `ready`, so features finish mounting first and IX2 sees the DOM they produced.
+2. Stops if the navigation `signal` was aborted meanwhile; the next navigation runs its own re-init.
+3. Copies the `data-wf-page` attribute of the fetched document's `<html>` (`nav.html`) onto `document.documentElement`. Without `nav.html` or the attribute, `<html>` is left untouched.
+4. Calls `Webflow.destroy()`, `Webflow.ready()` and `Webflow.require('ix2')?.init()`, in that order. A site without IX2 skips the last call.
+
+An error thrown by Webflow is reported with a `[webflow]` warning; it never rejects. The handler returns no cleanup.
+
+- **Load order:** `webflowReinit(window.Webflow)` reads `window.Webflow` once, when the runtime is configured, so create the runtime after `webflow.js` has run. A bundle loaded as a module script (`type="module"`, Vite's default) already runs after the synchronous `webflow.js` at the end of `<body>`. If the bundle runs first, the handler holds `undefined` or Webflow's `[]` push queue, and every navigation is reported with a `[webflow] re-init failed` warning instead of re-initializing.
+- **Barba sync transitions:** in a Barba transition with `sync: true` the new page enters before the old one has left (see [§4](#4-barbajs)), so depending on when Barba removes the old container, the re-init can run while it is still in the document and IX2 binds to elements that are about to be removed. The adapter's `mode` does not change this: it only picks the hook that disposes the old page, and it must match the transition. Prefer non-sync transitions on Webflow sites.
+- **Limitation:** features must not read IX2 state in `onSetup`. IX2 is re-initialized only after every feature has settled.
+- `Webflow.ready()` runs the site's `Webflow.push` callbacks again, as a manual re-init does.
+- The instance is typed structurally (`WebflowLike`: `destroy`, `ready`, `require`), so the package has no dependency on Webflow, and the core entry never imports this one.
+
+```ts
+import type { WebflowLike } from '@refokus-agency/feature-engine/webflow';
 ```

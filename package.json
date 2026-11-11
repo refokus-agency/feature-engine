@@ -19,6 +19,10 @@
     "./barba": {
       "types": "./dist/adapters/barba/index.d.ts",
       "import": "./dist/adapters/barba/index.js"
+    },
+    "./webflow": {
+      "types": "./dist/integrations/webflow/index.d.ts",
+      "import": "./dist/integrations/webflow/index.js"
     }
   },
   "files": [
