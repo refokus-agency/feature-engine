@@ -1,4 +1,9 @@
-import type { FeatureDescriptor, FeatureMeta, LoaderOptions } from './types.ts';
+import type {
+  FeatureDescriptor,
+  FeatureMeta,
+  FeatureRoot,
+  LoaderOptions,
+} from './types.ts';
 
 const DEFAULT_TIMEOUT_MS = 10_000;
 
@@ -31,6 +36,8 @@ interface ExecutionContext {
   // entry — so `exposedValues.has(id)` is a meaningful "did this feature expose?" check.
   exposedValues: Map<string, unknown>;
   warn: LogFn;
+  // Resolved `root` option (`document` when omitted); scopes element queries in `initFeature`.
+  root: FeatureRoot;
 }
 
 function resolveTimeout(raw: number | undefined, warn: LogFn): number {
@@ -44,7 +51,11 @@ function resolveTimeout(raw: number | undefined, warn: LogFn): number {
   return timeout;
 }
 
-function matchFeatures(features: FeatureMeta[], warn: LogFn): FeatureMeta[] {
+function matchFeatures(
+  features: FeatureMeta[],
+  root: FeatureRoot,
+  warn: LogFn,
+): FeatureMeta[] {
   const matched: FeatureMeta[] = [];
 
   for (const feature of features) {
@@ -55,7 +66,7 @@ function matchFeatures(features: FeatureMeta[], warn: LogFn): FeatureMeta[] {
 
     for (const selector of feature.selectors) {
       try {
-        if (document.querySelector(selector)) {
+        if (root.querySelector(selector)) {
           matched.push(feature);
           break;
         }
@@ -96,6 +107,7 @@ async function initFeature(
   feature: FeatureDescriptor,
   selectors: string[],
   deps: Record<string, unknown>,
+  root: FeatureRoot,
   signal?: AbortSignal,
 ): Promise<unknown> {
   if (feature.enabled === false) return EXPOSE_SKIPPED;
@@ -103,17 +115,17 @@ async function initFeature(
 
   let ctx: unknown;
   if (feature.onSetup) {
-    ctx = await feature.onSetup(selectors, { deps });
+    ctx = await feature.onSetup(selectors, { deps, root });
     if (ctx === false) return EXPOSE_SKIPPED;
   }
 
   if (signal?.aborted) return EXPOSE_SKIPPED;
 
   if (feature.onEach && selectors.length) {
-    const elements = document.querySelectorAll(selectors.join(', '));
+    const elements = root.querySelectorAll(selectors.join(', '));
     for (let j = 0; j < elements.length; j++) {
       if (signal?.aborted) return EXPOSE_SKIPPED;
-      await feature.onEach({ el: elements[j]!, index: j, elements, ctx });
+      await feature.onEach({ el: elements[j]!, index: j, elements, ctx, root });
     }
   }
 
@@ -301,7 +313,13 @@ async function runWithDeps(
     }
   }
 
-  const exposed = await initFeature(descriptor, meta.selectors, deps, signal);
+  const exposed = await initFeature(
+    descriptor,
+    meta.selectors,
+    deps,
+    ctx.root,
+    signal,
+  );
 
   // Store the exposed value before this feature's markReady fires (markReady runs in
   // dispatchWaves's finally, after runWithDeps resolves). EXPOSE_SKIPPED means `expose` never
@@ -400,7 +418,9 @@ export async function loadFeatures(
 
   const globalTimeout = resolveTimeout(options?.timeout, warn);
 
-  const matchedFeatures = matchFeatures(features, warn);
+  const root = options?.root ?? document;
+
+  const matchedFeatures = matchFeatures(features, root, warn);
   if (!matchedFeatures.length) return;
 
   matchedFeatures.sort((a, b) => a.priority - b.priority);
@@ -429,6 +449,7 @@ export async function loadFeatures(
     failedIds,
     exposedValues: new Map(),
     warn,
+    root,
   };
 
   const waves = groupIntoWaves(loaded, warn);

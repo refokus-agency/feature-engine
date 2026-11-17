@@ -3,6 +3,7 @@ export type {
   FeatureDescriptorInput,
   FeatureEachContext,
   FeatureMeta,
+  FeatureRoot,
   LoaderOptions,
   OnEachFn,
   OnReadyFn,
