@@ -157,10 +157,11 @@ Loads and executes features in dependency order.
 |--------|------|---------|-------------|
 | `timeout` | `number` | `10000` | Global timeout in ms, used by every feature whose own `timeout` is `null` (a feature-level `timeout` overrides it). `0` disables the timeout globally; negative or `NaN` values fall back to `10000` |
 | `logging` | `boolean` | `true` | Enable/disable console warnings |
+| `root` | `FeatureRoot` (`Document \| Element \| DocumentFragment`) | `document` | Container that scopes feature matching and `onEach` element queries. Only descendants of `root` are searched. A `ShadowRoot` works too |
 
 **Behavior:**
 
-1. **Match** — global features always match; others require at least one selector present in the DOM
+1. **Match** — global features always match (they ignore `root`); others require at least one selector matching a descendant of `root`
 2. **Sort** — topological sort by dependencies, then by priority
 3. **Load** — lazy-import all matched features in parallel (`Promise.allSettled`)
 4. **Execute** — group features into priority waves. Features within each wave run in parallel (`Promise.allSettled`), respecting inter-feature dependencies via a dependency gate. Waves execute sequentially (lower priority first). A feature is **promoted** into the wave of its dependency whenever that dependency sits in a later wave, regardless of the feature's own `priority`. If a dependency fails, its dependents are skipped
@@ -182,12 +183,13 @@ Features with `enabled: false` and duplicate IDs are excluded. The virtual modul
 ```
 defineFeature()
   │
-  ├─ onSetup(selectors, { deps })  → runs once; receives matched selectors and
-  │    │                              the exposed values of its dependencies
+  ├─ onSetup(selectors, { deps, root })  → runs once; receives matched selectors,
+  │    │                                    the exposed values of its dependencies
+  │    │                                    and the loader root
   │    ├─ returns false      → abort (skip onEach, onReady + expose)
   │    └─ returns ctx        → passed to onEach
   │
-  ├─ onEach({ el, index, elements, ctx })  → runs per matched element
+  ├─ onEach({ el, index, elements, ctx, root })  → runs per matched element
   │
   ├─ onReady()               → runs after all elements processed
   │
@@ -234,6 +236,21 @@ export default defineFeature({
 
 A feature without `expose` publishes nothing, and its dependents see no entry for it. If a dependency fails, its dependents are skipped.
 
+### Querying the DOM from hooks
+
+`onSetup` and `onEach` receive `root`: the container passed to `loadFeatures` (or `document` when no `root` option was given). Hooks must query through `root` or `el` instead of `document`, so a feature only touches elements inside the container it was loaded for. This matters during page transitions, when the outgoing and incoming containers are both in the DOM.
+
+```ts
+onEach: ({ el, root }) => {
+  // ✅ scoped to the current container
+  const duplicates = root.querySelectorAll(`#${el.id}`);
+  // ❌ reaches into every container on the page
+  // document.querySelectorAll(`#${el.id}`);
+},
+```
+
+**Descendants only:** `root` is searched with `root.querySelector` / `root.querySelectorAll`, which never return the `root` element itself. A selector that matches only the container does not match the feature. To target the container, put the selector on a child element of the container instead.
+
 ## Types
 
 All types are exported from the main entry point:
@@ -243,11 +260,13 @@ import type {
   FeatureDescriptor,       // Frozen runtime descriptor
   FeatureDescriptorInput,  // Input shape for defineFeature()
   FeatureMeta,             // Metadata + lazy loader (used by loadFeatures)
+  FeatureRoot,             // Document | Element | DocumentFragment (loader root)
   LoaderOptions,           // Options for loadFeatures()
-  OnSetupFn,               // (selectors: string[], { deps }) => unknown | false | Promise<...>
+  OnSetupFn,               // (selectors: string[], context: OnSetupContext) => unknown | false | Promise<...>
+  OnSetupContext,          // { deps, root }
   OnEachFn,                // (ctx: FeatureEachContext) => void | Promise<void>
   OnReadyFn,               // () => void | Promise<void>
-  FeatureEachContext,       // { el, index, elements, ctx }
+  FeatureEachContext,       // { el, index, elements, ctx, root }
 } from '@refokus-agency/feature-engine';
 ```
 

@@ -37,7 +37,7 @@ Three independent pieces, each maps to a phase of the system:
 2. **`src/vite/`** — the build-time half. `featureMetadataPlugin` (in `index.ts`) scans `src/features/**/*.feature.js`, and for each file `parse-feature-file.ts` extracts metadata **statically via acorn AST parsing** — never by executing the module. It only reads literal values (`extractLiteralValue` handles string/number/bool/string-arrays/negative-number-unary); any non-literal value causes the whole file to be skipped with a warning. The plugin emits a `virtual:feature-metadata` module: an array of `FeatureMeta` objects each carrying the static metadata plus a `load: () => import(filePath)` lazy loader. This split (static metadata eagerly available, hook code lazily imported) is what enables code splitting — `loadFeatures` can decide what to run before any feature chunk is downloaded.
 
 3. **`src/loader.ts`** — runtime. `loadFeatures(features, options)` orchestrates:
-   - **Match** (`matchFeatures`): `global` features always match; others need at least one selector present in the DOM.
+   - **Match** (`matchFeatures`): `global` features always match; others need at least one selector matching a descendant of `root` (the `root` option, default `document`).
    - **Sort** (`topoSort`): DFS topological sort by `dependencies`; circular edges are pruned (not fatal) and recorded in `prunedEdges`.
    - **Load** (`loadChunks`): all matched chunks lazy-imported in parallel via `Promise.allSettled`; load failures are recorded in `failedIds`.
    - **Execute** (`groupIntoWaves` + `dispatchWaves`): features grouped into **priority waves**. A feature can be *promoted* to a later wave if it depends on something in a later wave. Waves run sequentially (lower priority first); features **within** a wave run in parallel via `Promise.allSettled`, gated by a `DependencyGate` (`createDependencyGate`) that resolves promises as each dependency's `markReady` fires. A feature whose dependency failed is skipped and itself marked failed (cascading).
@@ -46,7 +46,7 @@ Three independent pieces, each maps to a phase of the system:
 
 ### Feature lifecycle
 
-`onSetup(selectors, { deps })` → `onEach({ el, index, elements, ctx })` per element → `onReady()` → `expose(ctx)`. `onSetup` returning `false` aborts the feature (skips `onEach`/`onReady`); any other return becomes `ctx`. Global features run `onSetup`/`onReady` only — `onEach` is rejected at `defineFeature` time. Execution respects `AbortSignal` (driven by `withTimeout`) and checks `signal.aborted` between every hook.
+`onSetup(selectors, { deps, root })` → `onEach({ el, index, elements, ctx, root })` per element → `onReady()` → `expose(ctx)`. `onSetup` returning `false` aborts the feature (skips `onEach`/`onReady`); any other return becomes `ctx`. Global features run `onSetup`/`onReady` only — `onEach` is rejected at `defineFeature` time. Execution respects `AbortSignal` (driven by `withTimeout`) and checks `signal.aborted` between every hook.
 
 Features share values through `expose`/`deps`: after a feature's lifecycle completes, its optional `expose(ctx)` projection runs and the return value is published under the feature's id. Every dependent then receives it via `onSetup`'s second argument — `deps` maps each id in `dependencies` to that feature's exposed value. This is what the `DependencyGate` is gating on, so a feature declaring a dependency can read its value without reaching for globals. A feature with no `expose` publishes nothing and its dependents see no entry for it.
 
